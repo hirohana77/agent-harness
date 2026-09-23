@@ -18,3 +18,6 @@ export * from './verifier/file-verifier.js';
 export * from './verifier/command-verifier.js';
 export * from './verifier/trajectory-verifier.js';
 export * from './verifier/index.js';
+export * from './reporters/terminal.js';
+export * from './reporters/json.js';
+export * from './reporters/markdown.js';
