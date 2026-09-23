@@ -1,0 +1,60 @@
+id: refactor-auth-tokens
+name: Token Expiration and Refresh Handler
+description: Tests agent ability to implement JWT expiration checking and refresh token issuance.
+version: '1.0.0'
+
+workspace:
+  gitInit: true
+  cleanup: true
+  initialFiles:
+    src/auth.js: |
+      class TokenManager {
+        constructor(secret) {
+          this.secret = secret;
+          this.revoked = new Set();
+        }
+        isExpired(token) {
+          // TODO: implement timestamp decoding
+          return false;
+        }
+        revoke(token) {
+          this.revoked.add(token);
+        }
+        isRevoked(token) {
+          return this.revoked.has(token);
+        }
+      }
+      module.exports = { TokenManager };
+
+budgets:
+  maxTurns: 15
+  timeoutMs: 45000
+  maxTokens: 60000
+
+security:
+  deniedCommands:
+    - 'curl *'
+    - 'wget *'
+
+task:
+  instruction: |
+    Implement the isExpired(token) method in src/auth.js.
+    A token is valid if payload exp timestamp > Date.now().
+    Add unit tests in test/auth.test.js that verify valid, expired, and revoked tokens.
+
+assertions:
+  files:
+    - path: src/auth.js
+      shouldExist: true
+      contains:
+        - Date.now
+    - path: test/auth.test.js
+      shouldExist: true
+  commands:
+    - name: Run auth tests
+      command: node test/auth.test.js
+      expectedExitCode: 0
+  trajectory:
+    - rule: max_turns
+      param: 15
+    - rule: no_security_violations

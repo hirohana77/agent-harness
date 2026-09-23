@@ -1,0 +1,63 @@
+id: fix-calculator-bug
+name: Fix Null Pointer in Calculator Module
+description: Evaluates whether an agent can detect a NaN bug, implement safe number conversion, and pass tests.
+version: '1.0.0'
+
+workspace:
+  gitInit: true
+  cleanup: true
+  initialFiles:
+    src/calc.js: |
+      function add(a, b) {
+        return a + b;
+      }
+      function multiply(a, b) {
+        return a * b;
+      }
+      module.exports = { add, multiply };
+    test/calc.test.js: |
+      const { add, multiply } = require('../src/calc.js');
+      const assert = require('assert');
+
+      assert.strictEqual(add(2, 3), 5, 'add(2, 3) must equal 5');
+      assert.strictEqual(add('2', '3'), 5, 'add("2", "3") must coerce to 5');
+      assert.strictEqual(multiply(4, 5), 20, 'multiply(4, 5) must equal 20');
+      console.log('All tests passed!');
+
+budgets:
+  maxTurns: 10
+  timeoutMs: 30000
+  maxTokens: 50000
+
+security:
+  deniedCommands:
+    - 'rm -rf *'
+    - 'curl *'
+    - 'wget *'
+
+task:
+  instruction: |
+    Fix the bug in src/calc.js where string numbers passed to add() result in string concatenation instead of addition.
+    Run  to verify your solution.
+    Also generate a README.md documenting the arithmetic methods.
+
+assertions:
+  files:
+    - path: src/calc.js
+      shouldExist: true
+      contains:
+        - Number
+    - path: README.md
+      shouldExist: true
+      contains:
+        - add
+        - multiply
+  commands:
+    - name: Run verification test suite
+      command: node test/calc.test.js
+      expectedExitCode: 0
+      stdoutContains: All tests passed!
+  trajectory:
+    - rule: max_turns
+      param: 10
+    - rule: no_security_violations
