@@ -63,3 +63,5 @@ export interface AgentRunResult {
   message?: string;
   error?: string;
 }
+
+export type TrajectoryStatus = Trajectory['status'];

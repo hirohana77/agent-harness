@@ -11,3 +11,6 @@ export * from './core/errors.js';
 export * from './sandbox/security.js';
 export * from './sandbox/workspace.js';
 export * from './sandbox/executor.js';
+export * from './trajectory/recorder.js';
+export * from './trajectory/replayer.js';
+export * from './trajectory/exporter.js';
