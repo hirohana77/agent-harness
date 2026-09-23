@@ -21,3 +21,4 @@ export * from './verifier/index.js';
 export * from './reporters/terminal.js';
 export * from './reporters/json.js';
 export * from './reporters/markdown.js';
+export * from './core/harness.js';

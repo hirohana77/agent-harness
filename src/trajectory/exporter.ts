@@ -22,7 +22,9 @@ export class TrajectoryExporter {
   /**
    * Save trajectory to file (.json or .yaml)
    */
-  public static async saveToFile(filePath: string, trajectory: Trajectory): Promise<string> {
+  public static async saveToFile(arg1: string | Trajectory, arg2: string | Trajectory): Promise<string> {
+    const filePath = typeof arg1 === "string" ? arg1 : (arg2 as string);
+    const trajectory = typeof arg1 === "string" ? (arg2 as Trajectory) : arg1;
     const resolved = path.resolve(filePath);
     await fs.mkdir(path.dirname(resolved), { recursive: true });
 

@@ -3,7 +3,7 @@ import { ToolCallResult } from '../core/types.js';
 import { SecurityPolicyChecker } from './security.js';
 
 export interface CommandExecutionOptions {
-  cwd: string;
+  cwd?: string;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
@@ -11,17 +11,19 @@ export interface CommandExecutionOptions {
 
 export class CommandExecutor {
   private security: SecurityPolicyChecker;
+  private defaultCwd?: string;
   private maxOutputBytes: number;
 
-  constructor(security: SecurityPolicyChecker, maxOutputBytes = 1024 * 1024) {
+  constructor(security: SecurityPolicyChecker, defaultCwd?: string, maxOutputBytes = 1024 * 1024) {
     this.security = security;
+    this.defaultCwd = defaultCwd;
     this.maxOutputBytes = maxOutputBytes;
   }
 
   /**
    * Run a shell command securely within the sandbox
    */
-  public async execute(command: string, options: CommandExecutionOptions): Promise<ToolCallResult> {
+  public async execute(command: string, options: CommandExecutionOptions = {}): Promise<ToolCallResult> {
     const startTime = Date.now();
 
     // 1. Security validation
