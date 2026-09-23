@@ -9,6 +9,7 @@ import { ScenarioVerifier } from "../verifier/index.js";
 
 export interface AgentExecutionContext {
   scenario: ScenarioDefinition;
+  workspace: WorkspaceManager;
   workspacePath: string;
   executor: CommandExecutor;
   recorder: TrajectoryRecorder;
@@ -34,6 +35,7 @@ export class AgentHarness {
     try {
       await agentRunner({
         scenario,
+        workspace,
         workspacePath,
         executor,
         recorder,
@@ -99,5 +101,19 @@ export class AgentHarness {
     }
 
     return { report, replayer, workspacePath };
+  }
+
+  public async runScenario(
+    scenarioInput: ScenarioDefinition,
+    agentRunner: (ctx: AgentExecutionContext) => Promise<void>
+  ): Promise<{ report: HarnessReport; trajectory: Trajectory; workspacePath: string }> {
+    return AgentHarness.runScenario(scenarioInput, agentRunner);
+  }
+
+  public async replayScenario(
+    scenarioInput: ScenarioDefinition,
+    trajectory: Trajectory
+  ): Promise<{ report: HarnessReport; replayer: TrajectoryReplayer; workspacePath: string }> {
+    return AgentHarness.replayScenario(scenarioInput, trajectory);
   }
 }
