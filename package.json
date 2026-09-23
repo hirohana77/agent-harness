@@ -1,0 +1,55 @@
+{
+  "name": "agent-harness",
+  "version": "0.1.0",
+  "description": "Deterministic execution, sandbox evaluation, and trajectory verification harness for autonomous AI agents",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-harness": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hirohana77/agent-harness.git"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "harness",
+    "evaluation",
+    "sandbox",
+    "trajectory",
+    "swe-bench",
+    "autonomous-agent",
+    "llm",
+    "testing"
+  ],
+  "author": "hirohana77 <15876143458@163.com>",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^6.0.0",
+    "commander": "^15.0.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@vitest/coverage-v8": "^5.0.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.1"
+  }
+}
