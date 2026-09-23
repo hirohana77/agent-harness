@@ -14,3 +14,7 @@ export * from './sandbox/executor.js';
 export * from './trajectory/recorder.js';
 export * from './trajectory/replayer.js';
 export * from './trajectory/exporter.js';
+export * from './verifier/file-verifier.js';
+export * from './verifier/command-verifier.js';
+export * from './verifier/trajectory-verifier.js';
+export * from './verifier/index.js';

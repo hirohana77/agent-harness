@@ -1,82 +1,79 @@
-import path from 'node:path';
-import { SecurityPolicy } from '../core/types.js';
-import { SecurityViolationError } from '../core/errors.js';
+import path from "node:path";
+import { SecurityPolicy } from "../core/types.js";
+import { SecurityPolicySchema } from "../core/schemas.js";
+import { SecurityViolationError } from "../core/errors.js";
 
 export class SecurityPolicyChecker {
   private policy: SecurityPolicy;
-  private workspaceRoot: string;
+  private workspaceRoot?: string;
 
-  constructor(policy: SecurityPolicy, workspaceRoot: string) {
-    this.policy = policy;
-    this.workspaceRoot = path.resolve(workspaceRoot);
+  constructor(policy: Partial<SecurityPolicy> = {}, workspaceRoot?: string) {
+    this.policy = SecurityPolicySchema.parse(policy);
+    if (workspaceRoot) {
+      this.workspaceRoot = path.resolve(workspaceRoot);
+    }
   }
 
-  /**
-   * Validate command against denied and allowed command patterns
-   */
+  public setWorkspaceRoot(root: string): void {
+    this.workspaceRoot = path.resolve(root);
+  }
+
+  public getWorkspaceRoot(): string | undefined {
+    return this.workspaceRoot;
+  }
+
   public validateCommand(command: string): void {
     const trimmed = command.trim();
     if (!trimmed) {
       return;
     }
 
-    // 1. Check against denied commands
     for (const denied of this.policy.deniedCommands) {
       if (this.matchesPattern(trimmed, denied)) {
         throw new SecurityViolationError(
-          `Command rejected by security policy (matches denied rule: "${denied}"): "${command}"`,
-          { command, deniedRule: denied }
+          `Command execution denied by security policy: matches forbidden pattern "${denied}"`,
+          { command: trimmed, matchedPattern: denied }
         );
       }
     }
 
-    // 2. Check against allowed commands (if not wildcard ['*'])
-    const isWildcardAllowed = this.policy.allowedCommands.length === 1 && this.policy.allowedCommands[0] === '*';
-    if (!isWildcardAllowed) {
+    if (this.policy.allowedCommands.length > 0) {
       const isAllowed = this.policy.allowedCommands.some((allowed) =>
         this.matchesPattern(trimmed, allowed)
       );
       if (!isAllowed) {
         throw new SecurityViolationError(
-          `Command rejected by security policy (not in allowedCommands list): "${command}"`,
-          { command, allowedRules: this.policy.allowedCommands }
+          `Command execution denied: "${trimmed}" is not in allowedCommands whitelist.`,
+          { command: trimmed, allowedPatterns: this.policy.allowedCommands }
         );
       }
     }
   }
 
-  /**
-   * Validate that a target path stays strictly inside the workspace
-   */
-  public validatePath(targetPath: string): string {
-    const resolved = path.isAbsolute(targetPath)
-      ? path.resolve(targetPath)
-      : path.resolve(this.workspaceRoot, targetPath);
+  public validatePath(targetPath: string, root?: string): string {
+    const base = root ? path.resolve(root) : this.workspaceRoot;
+    if (!base) {
+      return path.resolve(targetPath);
+    }
 
-    const relative = path.relative(this.workspaceRoot, resolved);
-    const escapes = relative.startsWith('..') || path.isAbsolute(relative);
+    const resolvedTarget = path.isAbsolute(targetPath) ? path.resolve(targetPath) : path.resolve(base, targetPath);
+    const relative = path.relative(base, resolvedTarget);
 
-    if (escapes) {
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
       throw new SecurityViolationError(
-        `Path traversal detected: "${targetPath}" resolves to outside workspace root "${this.workspaceRoot}"`,
-        { targetPath, resolvedPath: resolved, workspaceRoot: this.workspaceRoot }
+        `Path access violation: target "${targetPath}" escapes workspace root "${base}".`,
+        { targetPath, workspaceRoot: base }
       );
     }
-
-    return resolved;
+    return resolvedTarget;
   }
 
-  private matchesPattern(input: string, pattern: string): boolean {
-    if (pattern === '*' || input === pattern) {
-      return true;
+  private matchesPattern(command: string, pattern: string): boolean {
+    if (pattern.includes("*")) {
+      const regexStr = "^" + pattern.split("*").map(s => s.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")).join(".*") + "$";
+      const regex = new RegExp(regexStr, "i");
+      return regex.test(command);
     }
-
-    // Escape regex characters except asterisk *
-    const regexPattern = pattern
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*');
-
-    const regex = new RegExp(`(^|\\s)${regexPattern}(\\s|$)`, 'i');
-    return regex.test(input) || input.includes(pattern);
+    return command.includes(pattern);
   }
 }

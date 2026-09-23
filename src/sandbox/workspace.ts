@@ -4,6 +4,7 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WorkspaceConfig } from '../core/types.js';
+import { WorkspaceConfigSchema } from '../core/schemas.js';
 import { WorkspaceError } from '../core/errors.js';
 import { SecurityPolicyChecker } from './security.js';
 
@@ -15,20 +16,22 @@ export class WorkspaceManager {
   private workspacePath: string | null = null;
   private isCleanedUp = false;
 
-  constructor(config: WorkspaceConfig, security: SecurityPolicyChecker) {
-    this.config = config;
+  constructor(
+    config: Partial<WorkspaceConfig> = {},
+    security: SecurityPolicyChecker = new SecurityPolicyChecker()
+  ) {
+    this.config = WorkspaceConfigSchema.parse(config);
     this.security = security;
   }
 
-  /**
-   * Initializes the isolated workspace folder, applies templates, initial files, and git setup.
-   */
-  public async setup(): Promise<string> {
+  public async setup(overrideConfig?: Partial<WorkspaceConfig>): Promise<string> {
+    if (overrideConfig) {
+      this.config = WorkspaceConfigSchema.parse({ ...this.config, ...overrideConfig });
+    }
     try {
       const tempBase = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-harness-ws-'));
       this.workspacePath = path.resolve(tempBase);
 
-      // 1. Copy template directory if provided
       if (this.config.templatePath) {
         const resolvedTemplate = path.resolve(this.config.templatePath);
         await fs.cp(resolvedTemplate, this.workspacePath, {
@@ -37,60 +40,68 @@ export class WorkspaceManager {
         });
       }
 
-      // 2. Populate initialFiles
       if (this.config.initialFiles) {
         for (const [relPath, content] of Object.entries(this.config.initialFiles)) {
-          await this.writeFile(relPath, content);
+          const targetPath = this.resolvePath(relPath);
+          await fs.mkdir(path.dirname(targetPath), { recursive: true });
+          await fs.writeFile(targetPath, content, 'utf-8');
         }
       }
 
-      // 3. Initialize git repository if configured
       if (this.config.gitInit) {
-        await this.initGit();
+        await this.initGitRepo();
       }
 
       return this.workspacePath;
     } catch (err: unknown) {
       await this.teardown().catch(() => {});
-      throw new WorkspaceError(`Failed to setup workspace: ${(err as Error).message}`, err);
+      throw new WorkspaceError(`Failed to setup workspace: ${(err as Error).message}`);
+    }
+  }
+
+  private async initGitRepo(): Promise<void> {
+    if (!this.workspacePath) return;
+    try {
+      await execFileAsync('git', ['init', '-b', 'main'], { cwd: this.workspacePath });
+      await execFileAsync('git', ['config', 'user.name', 'AgentHarness'], { cwd: this.workspacePath });
+      await execFileAsync('git', ['config', 'user.email', 'harness@agent.local'], { cwd: this.workspacePath });
+      await execFileAsync('git', ['add', '.'], { cwd: this.workspacePath });
+      await execFileAsync('git', ['commit', '-m', 'initial workspace seed', '--allow-empty'], {
+        cwd: this.workspacePath,
+      });
+    } catch (err: unknown) {
+      throw new WorkspaceError(`Failed to initialize git repository in workspace: ${(err as Error).message}`);
     }
   }
 
   public getWorkspacePath(): string {
-    if (!this.workspacePath) {
-      throw new WorkspaceError('Workspace is not initialized. Call setup() first.');
+    if (!this.workspacePath || this.isCleanedUp) {
+      throw new WorkspaceError('Workspace is not initialized or has already been torn down.');
     }
     return this.workspacePath;
   }
 
-  /**
-   * Safely write a file inside the isolated workspace
-   */
-  public async writeFile(relativePath: string, content: string): Promise<string> {
-    const fullPath = this.security.validatePath(path.join(this.getWorkspacePath(), relativePath));
+  public resolvePath(relativePath: string): string {
+    const ws = this.getWorkspacePath();
+    const resolved = path.resolve(ws, relativePath);
+    this.security.validatePath(resolved, ws);
+    return resolved;
+  }
+
+  public async writeFile(relativePath: string, content: string): Promise<void> {
+    const fullPath = this.resolvePath(relativePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, content, 'utf8');
-    return fullPath;
+    await fs.writeFile(fullPath, content, 'utf-8');
   }
 
-  /**
-   * Safely read a file from inside the isolated workspace
-   */
   public async readFile(relativePath: string): Promise<string> {
-    const fullPath = this.security.validatePath(path.join(this.getWorkspacePath(), relativePath));
-    try {
-      return await fs.readFile(fullPath, 'utf8');
-    } catch (err: unknown) {
-      throw new WorkspaceError(`File not found or unreadable: ${relativePath}`, err);
-    }
+    const fullPath = this.resolvePath(relativePath);
+    return await fs.readFile(fullPath, 'utf-8');
   }
 
-  /**
-   * Check if a file exists in the workspace
-   */
   public async fileExists(relativePath: string): Promise<boolean> {
     try {
-      const fullPath = this.security.validatePath(path.join(this.getWorkspacePath(), relativePath));
+      const fullPath = this.resolvePath(relativePath);
       await fs.access(fullPath);
       return true;
     } catch {
@@ -98,46 +109,27 @@ export class WorkspaceManager {
     }
   }
 
-  /**
-   * Capture git diff against initial commit (or HEAD)
-   */
   public async getGitDiff(): Promise<string> {
-    if (!this.config.gitInit) {
-      return '';
-    }
+    const ws = this.getWorkspacePath();
     try {
-      const { stdout } = await execFileAsync('git', ['diff', 'HEAD'], {
-        cwd: this.getWorkspacePath(),
-      });
+      const { stdout } = await execFileAsync('git', ['diff', 'HEAD'], { cwd: ws });
       return stdout;
-    } catch {
-      return '';
+    } catch (err: unknown) {
+      throw new WorkspaceError(`Failed to get git diff: ${(err as Error).message}`);
     }
   }
 
-  /**
-   * Teardown and clean up workspace directory
-   */
   public async teardown(): Promise<void> {
     if (this.isCleanedUp || !this.workspacePath) {
       return;
     }
-    if (this.config.cleanup) {
+    if (this.config?.cleanup) {
       try {
         await fs.rm(this.workspacePath, { recursive: true, force: true });
-      } catch {
-        // Ignore removal error
+      } catch (err: unknown) {
+        throw new WorkspaceError(`Failed to clean up workspace: ${(err as Error).message}`);
       }
     }
     this.isCleanedUp = true;
-  }
-
-  private async initGit(): Promise<void> {
-    const cwd = this.getWorkspacePath();
-    await execFileAsync('git', ['init', '-b', 'main'], { cwd });
-    await execFileAsync('git', ['config', 'user.name', 'agent-harness'], { cwd });
-    await execFileAsync('git', ['config', 'user.email', 'harness@local'], { cwd });
-    await execFileAsync('git', ['add', '-A'], { cwd });
-    await execFileAsync('git', ['commit', '-m', 'Initial workspace state', '--allow-empty'], { cwd });
   }
 }

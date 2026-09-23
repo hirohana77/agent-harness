@@ -100,7 +100,7 @@ export const ToolCallSchema = z.object({
   toolName: z.string(),
   arguments: z.record(z.string(), z.unknown()).default({}),
   result: ToolCallResultSchema.optional(),
-  durationMs: z.number().default(0),
+  durationMs: z.number().optional(),
 });
 
 export const AgentTurnSchema = z.object({
@@ -153,14 +153,14 @@ export const AssertionItemResultSchema = z.object({
   target: z.string(),
   passed: z.boolean(),
   message: z.string(),
-  durationMs: z.number().default(0),
+  durationMs: z.number().optional(),
   details: z.unknown().optional(),
 });
 
 export const HarnessReportSchema = z.object({
   scenarioId: z.string(),
-  scenarioName: z.string(),
-  timestamp: z.string(),
+  scenarioName: z.string().optional().default(""),
+  timestamp: z.string().default(() => new Date().toISOString()),
   passed: z.boolean(),
   metrics: z.object({
     durationMs: z.number(),
