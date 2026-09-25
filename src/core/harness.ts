@@ -6,6 +6,8 @@ import { CommandExecutor } from "../sandbox/executor.js";
 import { TrajectoryRecorder } from "../trajectory/recorder.js";
 import { TrajectoryReplayer } from "../trajectory/replayer.js";
 import { ScenarioVerifier } from "../verifier/index.js";
+import { MockToolRegistry } from "../mock/registry.js";
+import { VirtualToolDispatcher } from "../mock/dispatcher.js";
 
 export interface AgentExecutionContext {
   scenario: ScenarioDefinition;
@@ -13,6 +15,8 @@ export interface AgentExecutionContext {
   workspacePath: string;
   executor: CommandExecutor;
   recorder: TrajectoryRecorder;
+  tools: VirtualToolDispatcher;
+  mockRegistry: MockToolRegistry;
 }
 
 export class AgentHarness {
@@ -31,6 +35,8 @@ export class AgentHarness {
 
     const executor = new CommandExecutor(security, workspacePath);
     const recorder = new TrajectoryRecorder(scenario.id, scenario.budgets);
+    const mockRegistry = new MockToolRegistry();
+    const tools = new VirtualToolDispatcher(mockRegistry, executor, workspace, recorder);
 
     try {
       await agentRunner({
@@ -39,6 +45,8 @@ export class AgentHarness {
         workspacePath,
         executor,
         recorder,
+        tools,
+        mockRegistry,
       });
 
       recorder.finalize("completed");
@@ -55,6 +63,16 @@ export class AgentHarness {
     const trajectory = recorder.getTrajectory();
     const verifier = new ScenarioVerifier(scenario, workspace, executor);
     const report = await verifier.verify(trajectory);
+    const mockAssertions = mockRegistry.verifyAll();
+    if (mockAssertions.length > 0) {
+      report.assertionResults.push(...mockAssertions);
+      report.metrics.totalAssertions += mockAssertions.length;
+      report.metrics.passedAssertions += mockAssertions.filter((r: any) => r.passed).length;
+      report.metrics.failedAssertions += mockAssertions.filter((r: any) => !r.passed).length;
+      if (mockAssertions.some((r: any) => !r.passed)) {
+        report.passed = false;
+      }
+    }
 
     if (scenario.workspace?.cleanup) {
       await workspace.teardown();

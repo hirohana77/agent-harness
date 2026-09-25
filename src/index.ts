@@ -24,3 +24,4 @@ export * from './reporters/markdown.js';
 export * from './core/harness.js';
 export * from './mock/types.js';
 export * from './mock/registry.js';
+export * from './mock/dispatcher.js';
