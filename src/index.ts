@@ -22,3 +22,5 @@ export * from './reporters/terminal.js';
 export * from './reporters/json.js';
 export * from './reporters/markdown.js';
 export * from './core/harness.js';
+export * from './mock/types.js';
+export * from './mock/registry.js';
