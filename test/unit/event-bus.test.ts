@@ -177,3 +177,49 @@ describe('TrajectoryEventBus', () => {
     expect(order).toEqual([2, 1]);
   });
 });
+
+  it('should support waitForEvent with predicate and timeout', async () => {
+    const bus = new TrajectoryEventBus();
+
+    setTimeout(() => {
+      bus.emit(
+        bus.createEvent<TurnStartEvent>({
+          type: 'turn:start',
+          scenarioId: 'test-scenario',
+          turnNumber: 2,
+          prompt: 'waiting for turn 2',
+        })
+      );
+    }, 20);
+
+    const received = await bus.waitForEvent<TurnStartEvent>(
+      'turn:start',
+      (e) => e.turnNumber === 2,
+      1000
+    );
+
+    expect(received.turnNumber).toBe(2);
+  });
+
+  it('should reject waitForEvent if timeout exceeded', async () => {
+    const bus = new TrajectoryEventBus();
+
+    await expect(
+      bus.waitForEvent('scenario:complete', undefined, 50)
+    ).rejects.toThrow(/Timeout waiting for event pattern/);
+  });
+
+  it('should log warning when exceeding maxListeners limit', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = new TrajectoryEventBus({ maxListeners: 3 });
+
+    bus.on('turn:start', () => {});
+    bus.on('turn:start', () => {});
+    bus.on('turn:start', () => {});
+    bus.on('turn:start', () => {}); // 4th listener triggers warning
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('possible memory leak')
+    );
+    warnSpy.mockRestore();
+  });

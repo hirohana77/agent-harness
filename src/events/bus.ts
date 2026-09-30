@@ -13,42 +13,37 @@ interface RegisteredListener {
   once: boolean;
 }
 
+export interface TrajectoryEventBusOptions {
+  onError?: (err: unknown, event: TrajectoryEvent) => void;
+  maxListeners?: number;
+}
+
 export class TrajectoryEventBus {
   private listeners: Map<string, RegisteredListener> = new Map();
+  private exactListeners: Map<string, Set<string>> = new Map();
+  private prefixListeners: Map<string, Set<string>> = new Map();
+  private globalListeners: Set<string> = new Set();
   private errorHandler: (err: unknown, event: TrajectoryEvent) => void;
+  private maxListeners: number;
   private idCounter = 0;
 
-  constructor(options?: { onError?: (err: unknown, event: TrajectoryEvent) => void }) {
+  constructor(options?: TrajectoryEventBusOptions) {
+    this.maxListeners = options?.maxListeners ?? 100;
     this.errorHandler =
       options?.onError ||
       ((err, event) => {
-        // Default error isolation: capture listener failure without bringing down the bus
         console.error(`[TrajectoryEventBus] Listener error on event "${event.type}":`, err);
       });
   }
 
   /**
    * Subscribe to events matching a pattern
-   * Patterns supported:
-   *  - Exact type: 'turn:start', 'tool:end', etc.
-   *  - Prefix wildcard: 'tool:*', 'turn:*', 'scenario:*'
-   *  - Global wildcard: '*'
    */
   public on<T extends TrajectoryEvent = TrajectoryEvent>(
     pattern: EventPattern,
     listener: TrajectoryEventListener<T>
   ): EventUnsubscribe {
-    const id = `sub_${++this.idCounter}`;
-    this.listeners.set(id, {
-      id,
-      pattern,
-      listener: listener as TrajectoryEventListener,
-      once: false,
-    });
-
-    return () => {
-      this.listeners.delete(id);
-    };
+    return this.addListener(pattern, listener as TrajectoryEventListener, false);
   }
 
   /**
@@ -58,17 +53,7 @@ export class TrajectoryEventBus {
     pattern: EventPattern,
     listener: TrajectoryEventListener<T>
   ): EventUnsubscribe {
-    const id = `sub_${++this.idCounter}`;
-    this.listeners.set(id, {
-      id,
-      pattern,
-      listener: listener as TrajectoryEventListener,
-      once: true,
-    });
-
-    return () => {
-      this.listeners.delete(id);
-    };
+    return this.addListener(pattern, listener as TrajectoryEventListener, true);
   }
 
   /**
@@ -77,7 +62,7 @@ export class TrajectoryEventBus {
   public off(pattern: EventPattern, listener: TrajectoryEventListener): void {
     for (const [id, entry] of this.listeners.entries()) {
       if (entry.pattern === pattern && entry.listener === listener) {
-        this.listeners.delete(id);
+        this.removeListenerById(id);
       }
     }
   }
@@ -88,11 +73,15 @@ export class TrajectoryEventBus {
   public removeAllListeners(pattern?: EventPattern): void {
     if (!pattern) {
       this.listeners.clear();
+      this.exactListeners.clear();
+      this.prefixListeners.clear();
+      this.globalListeners.clear();
       return;
     }
+
     for (const [id, entry] of this.listeners.entries()) {
       if (entry.pattern === pattern) {
-        this.listeners.delete(id);
+        this.removeListenerById(id);
       }
     }
   }
@@ -114,14 +103,13 @@ export class TrajectoryEventBus {
   }
 
   /**
-   * Emit an event synchronously to matching listeners.
-   * Listener errors are isolated via the configured errorHandler.
+   * Emit an event synchronously with zero-crash error boundaries.
    */
   public emit(event: TrajectoryEvent): void {
     const targets = this.matchListeners(event.type);
     for (const target of targets) {
       if (target.once) {
-        this.listeners.delete(target.id);
+        this.removeListenerById(target.id);
       }
       try {
         const res = target.listener(event);
@@ -143,7 +131,7 @@ export class TrajectoryEventBus {
 
     for (const target of targets) {
       if (target.once) {
-        this.listeners.delete(target.id);
+        this.removeListenerById(target.id);
       }
       try {
         const res = target.listener(event);
@@ -165,6 +153,34 @@ export class TrajectoryEventBus {
   }
 
   /**
+   * Wait for a matching event with an optional timeout
+   */
+  public waitForEvent<T extends TrajectoryEvent = TrajectoryEvent>(
+    pattern: EventPattern,
+    predicate?: (event: T) => boolean,
+    timeoutMs = 5000
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+
+      const unsub = this.on(pattern, (evt: any) => {
+        if (!predicate || predicate(evt)) {
+          if (timer) clearTimeout(timer);
+          unsub();
+          resolve(evt);
+        }
+      });
+
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          unsub();
+          reject(new Error(`Timeout waiting for event pattern "${pattern}" after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }
+    });
+  }
+
+  /**
    * Helper to construct a typed event with timestamp and UUID
    */
   public createEvent<T extends TrajectoryEvent>(
@@ -177,27 +193,108 @@ export class TrajectoryEventBus {
     } as unknown as T;
   }
 
+  private addListener(
+    pattern: EventPattern,
+    listener: TrajectoryEventListener,
+    once: boolean
+  ): EventUnsubscribe {
+    if (this.listeners.size >= this.maxListeners) {
+      console.warn(
+        `[TrajectoryEventBus] Warning: possible memory leak. ${this.listeners.size} listeners added (max: ${this.maxListeners}).`
+      );
+    }
+
+    const id = `sub_${++this.idCounter}`;
+    const entry: RegisteredListener = { id, pattern, listener, once };
+    this.listeners.set(id, entry);
+
+    if (pattern === '*') {
+      this.globalListeners.add(id);
+    } else if (pattern.endsWith(':*')) {
+      const prefix = pattern.slice(0, -2);
+      if (!this.prefixListeners.has(prefix)) {
+        this.prefixListeners.set(prefix, new Set());
+      }
+      this.prefixListeners.get(prefix)!.add(id);
+    } else {
+      if (!this.exactListeners.has(pattern)) {
+        this.exactListeners.set(pattern, new Set());
+      }
+      this.exactListeners.get(pattern)!.add(id);
+    }
+
+    return () => {
+      this.removeListenerById(id);
+    };
+  }
+
+  private removeListenerById(id: string): void {
+    const entry = this.listeners.get(id);
+    if (!entry) return;
+
+    this.listeners.delete(id);
+    if (entry.pattern === '*') {
+      this.globalListeners.delete(id);
+    } else if (entry.pattern.endsWith(':*')) {
+      const prefix = entry.pattern.slice(0, -2);
+      const set = this.prefixListeners.get(prefix);
+      if (set) {
+        set.delete(id);
+        if (set.size === 0) this.prefixListeners.delete(prefix);
+      }
+    } else {
+      const set = this.exactListeners.get(entry.pattern);
+      if (set) {
+        set.delete(id);
+        if (set.size === 0) this.exactListeners.delete(entry.pattern);
+      }
+    }
+  }
+
   /**
-   * Match registered listeners against event type
+   * Fast indexed lookup of matching listeners
    */
   private matchListeners(eventType: TrajectoryEventType): RegisteredListener[] {
     const matched: RegisteredListener[] = [];
-    for (const entry of this.listeners.values()) {
-      if (this.matchesPattern(entry.pattern, eventType)) {
-        matched.push(entry);
+    const matchedIds = new Set<string>();
+
+    // 1. Exact match
+    const exact = this.exactListeners.get(eventType);
+    if (exact) {
+      for (const id of exact) {
+        const item = this.listeners.get(id);
+        if (item && !matchedIds.has(id)) {
+          matched.push(item);
+          matchedIds.add(id);
+        }
       }
     }
-    return matched;
-  }
 
-  private matchesPattern(pattern: EventPattern, eventType: TrajectoryEventType): boolean {
-    if (pattern === '*' || pattern === eventType) {
-      return true;
+    // 2. Prefix wildcard match (e.g. "tool:*" for "tool:start")
+    const colonIdx = eventType.indexOf(':');
+    if (colonIdx !== -1) {
+      const prefix = eventType.slice(0, colonIdx);
+      const prefixSet = this.prefixListeners.get(prefix);
+      if (prefixSet) {
+        for (const id of prefixSet) {
+          const item = this.listeners.get(id);
+          if (item && !matchedIds.has(id)) {
+            matched.push(item);
+            matchedIds.add(id);
+          }
+        }
+      }
     }
-    if (pattern.endsWith(':*')) {
-      const prefix = pattern.slice(0, -2);
-      return eventType.startsWith(`${prefix}:`);
+
+    // 3. Global wildcard match ("*")
+    for (const id of this.globalListeners) {
+      const item = this.listeners.get(id);
+      if (item && !matchedIds.has(id)) {
+        matched.push(item);
+        matchedIds.add(id);
+      }
     }
-    return false;
+
+    return matched;
   }
 }

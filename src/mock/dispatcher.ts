@@ -67,6 +67,7 @@ export class VirtualToolDispatcher {
 
   public async call(toolName: string, args: Record<string, unknown>): Promise<ToolCallResult> {
     const startTime = Date.now();
+    const callId = this.recorder?.notifyToolStart(toolName, args);
     let result: ToolCallResult;
 
     // Route 1: Mock registry (if registered or mocked)
@@ -93,7 +94,7 @@ export class VirtualToolDispatcher {
 
     const durationMs = Date.now() - startTime;
     if (this.recorder) {
-      this.recorder.recordToolCall(toolName, args, result, durationMs);
+      this.recorder.recordToolCall(toolName, args, result, durationMs, callId);
     }
 
     return result;

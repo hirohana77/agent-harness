@@ -127,14 +127,15 @@ export class TrajectoryRecorder {
     toolName: string,
     args: Record<string, unknown>,
     result?: ToolCallResult,
-    durationMs = 0
+    durationMs = 0,
+    callId?: string
   ): ToolCall {
     if (!this.currentTurn) {
       throw new Error('Cannot record tool call without an active turn. Call startTurn() first.');
     }
 
     const toolCall: ToolCall = {
-      callId: `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      callId: callId || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       toolName,
       arguments: args,
       result,

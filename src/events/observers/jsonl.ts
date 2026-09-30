@@ -7,6 +7,7 @@ export interface JsonLinesObserverOptions {
   filePath?: string;
   stream?: Writable;
   immediate?: boolean;
+  onError?: (err: Error) => void;
 }
 
 export class JsonLinesStreamObserver implements TrajectoryStreamObserver {
@@ -14,8 +15,9 @@ export class JsonLinesStreamObserver implements TrajectoryStreamObserver {
   private filePath?: string;
   private stream?: Writable;
   private immediate: boolean;
+  private onError?: (err: Error) => void;
   private pendingQueue: string[] = [];
-  private isWriting = false;
+  private flushPromise: Promise<void> | null = null;
   private initPromise?: Promise<void>;
 
   constructor(options: JsonLinesObserverOptions | string) {
@@ -26,6 +28,7 @@ export class JsonLinesStreamObserver implements TrajectoryStreamObserver {
       this.filePath = options.filePath;
       this.stream = options.stream;
       this.immediate = options.immediate ?? true;
+      this.onError = options.onError;
     }
 
     if (!this.filePath && !this.stream) {
@@ -39,24 +42,48 @@ export class JsonLinesStreamObserver implements TrajectoryStreamObserver {
   }
 
   public async onEvent(event: TrajectoryEvent): Promise<void> {
-    const line = JSON.stringify(event) + '\n';
-    this.pendingQueue.push(line);
+    try {
+      const line = JSON.stringify(event) + '\n';
+      this.pendingQueue.push(line);
 
-    if (this.immediate) {
-      await this.flush();
+      if (this.immediate) {
+        await this.flush();
+      }
+    } catch (err: any) {
+      if (this.onError) {
+        this.onError(err);
+      } else {
+        console.error('[JsonLinesStreamObserver] Error processing event:', err);
+      }
     }
   }
 
   public async flush(): Promise<void> {
+    if (this.flushPromise) {
+      await this.flushPromise;
+    }
+
+    if (this.pendingQueue.length === 0) {
+      return;
+    }
+
+    this.flushPromise = this.doFlush();
+    try {
+      await this.flushPromise;
+    } finally {
+      this.flushPromise = null;
+    }
+  }
+
+  private async doFlush(): Promise<void> {
     if (this.initPromise) {
       await this.initPromise;
     }
 
-    if (this.pendingQueue.length === 0 || this.isWriting) {
+    if (this.pendingQueue.length === 0) {
       return;
     }
 
-    this.isWriting = true;
     const chunk = this.pendingQueue.join('');
     this.pendingQueue = [];
 
@@ -71,13 +98,17 @@ export class JsonLinesStreamObserver implements TrajectoryStreamObserver {
       } else if (this.filePath) {
         await fs.appendFile(path.resolve(this.filePath), chunk, 'utf8');
       }
-    } finally {
-      this.isWriting = false;
+    } catch (err: any) {
+      if (this.onError) {
+        this.onError(err);
+      } else {
+        console.error('[JsonLinesStreamObserver] Error writing chunk:', err);
+      }
     }
 
-    // If more events arrived while flushing
+    // Flush any entries queued while writing
     if (this.pendingQueue.length > 0) {
-      await this.flush();
+      await this.doFlush();
     }
   }
 
