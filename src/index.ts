@@ -27,3 +27,4 @@ export * from './mock/registry.js';
 export * from './mock/dispatcher.js';
 export * from './benchmark/types.js';
 export * from './benchmark/runner.js';
+export * from './events/types.js';
