@@ -16,8 +16,11 @@
 - **Isolated Sandbox**: Dynamically provisions ephemeral workspaces with git baseline snapshots and strict path confinement.
 - **Security Guardrails**: Enforces command pattern blacklists and prevents host traversal attacks.
 - **Deterministic Trajectories**: Captures step-by-step agent turns, tool calls, token usage, latency, and costs.
+- **Real-Time Streaming Event Bus**: Zero-overhead pub/sub architecture supporting wildcard subscriptions (`tool:*`, `*`), live observers, and async event dispatching.
+- **Streaming Telemetry Observers**: Built-in `LiveConsoleObserver` for real-time terminal feedback, `JsonLinesStreamObserver` for streaming NDJSON persistence, and `BufferedStreamObserver` for replay.
 - **Offline Trajectory Replay**: Re-executes recorded trajectories against workspaces without consuming LLM API tokens.
 - **Multi-faceted Verification**: Asserts file system state, test suite exit codes, and agent behavioral constraints.
+- **Virtual Tool Dispatcher & Mock Engine**: Native workspace tools combined with mock tool registries and expectation assertions.
 - **Rich Reporting**: Beautiful terminal summaries, GitHub-flavored Markdown tables, and machine-readable JSON metrics.
 - **Headless & CI-Ready**: Programmatic TypeScript SDK and standalone CLI for automated evaluation pipelines.
 
@@ -25,48 +28,105 @@
 
 ## Installation
 
+```bash
+# Global CLI installation
+pnpm add -g agent-harness
+# or npm
+npm install -g agent-harness
 
-added 1 package in 1s
- ERR_PNPM_NO_GLOBAL_BIN_DIR  Unable to find the global bin directory
-
-Run "pnpm setup" to create it automatically, or set the global-bin-dir setting, or the PNPM_HOME env variable. The global bin directory should be in the PATH.
-Progress: resolved 1, reused 0, downloaded 0, added 0
-Packages: +1
-+
-Progress: resolved 1, reused 0, downloaded 1, added 1, done
-
-dependencies:
-+ agent-harness 0.0.1
-
-Done in 1s using pnpm v9.15.9
+# As a project dependency
+pnpm add agent-harness
+```
 
 ---
 
 ## Quick Start (CLI)
 
 ### 1. Scaffold a Scenario
-
+```bash
+agent-harness init --output ./scenario.yaml
+```
 
 ### 2. Validate Scenario Configuration
+```bash
+agent-harness validate --scenario ./scenario.yaml
+```
 
-
-### 3. Run Scenario with an Agent Command
-
+### 3. Run Scenario with Real-Time Streaming
+```bash
+agent-harness run \
+  --scenario ./scenario.yaml \
+  --command "npm test" \
+  --live \
+  --stream-jsonl ./events.jsonl \
+  --report-json ./report.json \
+  --report-md ./report.md \
+  --save-trajectory ./trajectory.json
+```
 
 ### 4. Deterministic Replay
-
-
----
-
-## Programmatic TypeScript SDK
-
-
+```bash
+agent-harness replay \
+  --scenario ./scenario.yaml \
+  --trajectory ./trajectory.json
+```
 
 ---
 
-## Scenario Specification
+## Real-Time Streaming Trajectory Event Bus
 
+The harness provides an asynchronous, non-blocking telemetry event bus to observe agent turns, tool executions, and budget constraints as they happen.
 
+```typescript
+import {
+  AgentHarness,
+  TrajectoryEventBus,
+  LiveConsoleObserver,
+  JsonLinesStreamObserver,
+  BufferedStreamObserver
+} from 'agent-harness';
+
+const eventBus = new TrajectoryEventBus();
+
+// Listen to specific patterns or wildcards
+eventBus.on('tool:*', (event) => {
+  console.log(`Tool activity: ${event.type} -> ${event.toolName}`);
+});
+
+eventBus.on('budget:warning', (warning) => {
+  console.warn(`Budget alert: ${warning.message}`);
+});
+
+// Run scenario with live observers
+const bufferObserver = new BufferedStreamObserver({ maxSize: 500 });
+const jsonlObserver = new JsonLinesStreamObserver('./stream.jsonl');
+const liveConsole = new LiveConsoleObserver({ verbose: true });
+
+const { report, trajectory } = await AgentHarness.runScenario(
+  scenarioDefinition,
+  async (ctx) => {
+    ctx.recorder.startTurn('Diagnose the failed build');
+    
+    const result = await ctx.tools.call('exec_command', { command: 'npm test' });
+    
+    ctx.recorder.completeTurn('Diagnosis completed', {
+      promptTokens: 120,
+      completionTokens: 80,
+      totalTokens: 200,
+    });
+  },
+  {
+    eventBus,
+    observers: [bufferObserver, jsonlObserver, liveConsole],
+  }
+);
+```
+
+---
+
+## Architecture Specification
+
+For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).
 
 ---
 
