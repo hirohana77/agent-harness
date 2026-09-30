@@ -11,6 +11,9 @@ import { TrajectoryExporter } from "../trajectory/exporter.js";
 import { TerminalReporter } from "../reporters/terminal.js";
 import { JsonReporter } from "../reporters/json.js";
 import { MarkdownReporter } from "../reporters/markdown.js";
+import { LiveConsoleObserver } from "../events/observers/console.js";
+import { JsonLinesStreamObserver } from "../events/observers/jsonl.js";
+import { TrajectoryStreamObserver } from "../events/types.js";
 
 const program = new Command();
 
@@ -161,6 +164,8 @@ program
   .description("Run a scenario using a shell script/agent command")
   .requiredOption("-s, --scenario <path>", "Path to scenario file")
   .option("-c, --command <agentCmd>", "Agent command to execute inside workspace (e.g., codex exec, custom script)")
+  .option("--live", "Stream real-time trajectory execution events to the console")
+  .option("--stream-jsonl <path>", "Stream real-time events in JSON Lines (NDJSON) format to file")
   .option("--report-json <path>", "Save report to JSON file")
   .option("--report-md <path>", "Save report to Markdown file")
   .option("--save-trajectory <path>", "Save generated trajectory to file")
@@ -169,31 +174,47 @@ program
       const scenario = await loadScenario(options.scenario);
       console.log(chalk.cyan(`Starting scenario run: ${scenario.name}`));
 
-      const { report, trajectory } = await AgentHarness.runScenario(scenario, async (ctx) => {
-        ctx.recorder.startTurn(scenario.task.instruction, "Starting automated execution");
+      const observers: TrajectoryStreamObserver[] = [];
+      if (options.live) {
+        observers.push(new LiveConsoleObserver({ verbose: true }));
+      }
+      if (options.streamJsonl) {
+        observers.push(new JsonLinesStreamObserver(options.streamJsonl));
+      }
 
-        if (options.command) {
-          const tStart = Date.now();
-          const result = await ctx.executor.execute(options.command);
-          ctx.recorder.recordToolCall(
-            "bash",
-            { command: options.command },
-            {
-              success: result.success,
-              output: result.output,
-              error: result.error,
-              exitCode: result.exitCode,
-            },
-            Date.now() - tStart
-          );
-        }
+      const { report, trajectory } = await AgentHarness.runScenario(
+        scenario,
+        async (ctx) => {
+          ctx.recorder.startTurn(scenario.task.instruction, "Starting automated execution");
 
-        ctx.recorder.completeTurn("Scenario run completed", {
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-        });
-      });
+          if (options.command) {
+            const tStart = Date.now();
+            ctx.recorder.notifyToolStart("bash", { command: options.command });
+            const result = await ctx.executor.execute(options.command);
+            ctx.recorder.recordToolCall(
+              "bash",
+              { command: options.command },
+              {
+                success: result.success,
+                output: result.output,
+                error: result.error,
+                exitCode: result.exitCode,
+              },
+              Date.now() - tStart
+            );
+          }
+
+          ctx.recorder.completeTurn("Scenario run completed", {
+            promptTokens: 100,
+            completionTokens: 50,
+            totalTokens: 150,
+          });
+        },
+        { observers }
+      );
+
+      // Ensure any stream observers close their underlying files
+      await Promise.allSettled(observers.map((o) => o.close?.()));
 
       TerminalReporter.print(report);
 

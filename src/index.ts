@@ -29,3 +29,4 @@ export * from './benchmark/types.js';
 export * from './benchmark/runner.js';
 export * from './events/types.js';
 export * from './events/bus.js';
+export * from './events/observers/index.js';
