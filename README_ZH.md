@@ -12,7 +12,8 @@
 
 ## 核心特性
 
-- 🛡️ **隔离沙箱与路径约束**：动态创建隔离临时工作区，初始化 Git 独立环境，强制约束文件路径不得越权逃逸。
+- 🐳 **可插拔沙箱后端 (Docker & Podman)**：支持轻量级本地环境与全虚拟化 Docker / Podman 容器驱动，提供 cgroups 资源限制（内存、CPU、进程数）与完全网络隔离（`network: none`）。
+- 🛡️ **隔离工作区与路径约束**：动态创建隔离临时工作区，初始化 Git 独立环境，强制约束文件路径不得越权逃逸。
 - 🔒 **安全守卫策略**：拦截危险命令（如 `rm -rf /`、未授权网络请求等），防止智能体误操作破坏宿主系统。
 - ⏱️ **确定性轨迹记录**：全流程精细化记录 Agent 的轮次（Turn）、思考过程（Thought）、工具调用（Tool Calls）、Token 消耗与耗时。
 - ⚡ **实时流式 Trajectory 事件总线**：基于发布/订阅模型的高性能事件总线，支持通配符订阅（`tool:*`, `*`）、异步调度与零崩溃异常边界隔离。
@@ -124,6 +125,42 @@ const { report, trajectory } = await AgentHarness.runScenario(
 ```
 
 ---
+
+## Docker & Podman 容器沙箱隔离
+
+针对不可信智能体代码执行或多环境依赖评测（如 SWE-bench 场景），`agent-harness` 提供全虚拟化容器驱动：
+
+### 场景配置模版 (`scenario.yaml`)
+```yaml
+id: docker-eval-demo
+name: Docker 容器沙箱代码评测
+sandbox:
+  backend: docker             # 支持 "local" | "docker" | "podman"
+  container:
+    image: node:20-alpine
+    network: none             # 严格网络隔离
+    memoryLimit: 512m
+    cpuLimit: 1.0
+    pidsLimit: 100
+    workdir: /workspace
+task:
+  instruction: 修复代码缺陷并通过回归单元测试
+```
+
+### CLI 容器控制参数
+```bash
+agent-harness run \
+  --scenario ./scenario.yaml \
+  --sandbox docker \
+  --image python:3.11-slim \
+  --container-network none \
+  --command "pytest -v"
+```
+
+### 容器生命周期安全守护
+- 宿主机临时工作区通过数据卷自动挂载进容器内部，文件修改双向同步，评测断言原生容器内执行；
+- 内置 `ContainerProcessRegistry` 监听进程退出与中断信号（`SIGINT` / `SIGTERM`），确保评测无论成功、失败或异常中断均 100% 自动清理无僵尸容器；
+- 支持智能探测 Docker / Podman 守护进程状态与动态回退。
 
 ## 架构说明
 

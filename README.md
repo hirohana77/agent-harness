@@ -13,7 +13,8 @@
 
 ## Highlights
 
-- **Isolated Sandbox**: Dynamically provisions ephemeral workspaces with git baseline snapshots and strict path confinement.
+- **Pluggable Sandbox Backends**: Run benchmarks in lightweight local temporary environments or fully virtualized **Docker / Podman** containers with cgroups resource limits and network isolation.
+- **Isolated Workspace**: Dynamically provisions ephemeral workspaces with git baseline snapshots and strict path confinement.
 - **Security Guardrails**: Enforces command pattern blacklists and prevents host traversal attacks.
 - **Deterministic Trajectories**: Captures step-by-step agent turns, tool calls, token usage, latency, and costs.
 - **Real-Time Streaming Event Bus**: Zero-overhead pub/sub architecture supporting wildcard subscriptions (`tool:*`, `*`), live observers, and async event dispatching.
@@ -123,6 +124,42 @@ const { report, trajectory } = await AgentHarness.runScenario(
 ```
 
 ---
+
+## Docker & Podman Container Sandboxing
+
+For untrusted agent execution or strict multi-environment benchmarks (e.g. SWE-bench style tasks), `agent-harness` provides a fully virtualized container backend:
+
+### Scenario Definition (`scenario.yaml`)
+```yaml
+id: docker-eval-demo
+name: Docker Sandboxed Code Evaluation
+sandbox:
+  backend: docker             # "local" | "docker" | "podman"
+  container:
+    image: node:20-alpine
+    network: none             # complete network isolation
+    memoryLimit: 512m
+    cpuLimit: 1.0
+    pidsLimit: 100
+    workdir: /workspace
+task:
+  instruction: Fix the regression and ensure tests pass
+```
+
+### CLI Container Flags
+```bash
+agent-harness run \
+  --scenario ./scenario.yaml \
+  --sandbox docker \
+  --image python:3.11-slim \
+  --container-network none \
+  --command "pytest -v"
+```
+
+### Automatic Lifecycle & Orphan Prevention
+- Workspaces on the host are automatically mounted into the container (`-v <hostPath>:<containerWorkdir>`).
+- Built-in `ContainerProcessRegistry` ensures clean termination on process exit, `SIGINT`, or uncaught failures to guarantee zero orphaned containers.
+- Automatic runtime probe checks daemon availability and seamlessly falls back or diagnoses connection issues.
 
 ## Architecture Specification
 

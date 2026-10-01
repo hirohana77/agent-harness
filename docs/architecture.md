@@ -45,9 +45,12 @@ The harness is structured into 6 decoupled layers:
    - Typed error hierarchies (`src/core/errors.ts`).
 
 3. **Isolated Sandbox Layer** (`src/sandbox/`):
+   - `SandboxBackend` interface & `SandboxBackendFactory`: Pluggable runtime strategy supporting `LocalSandboxBackend` and `ContainerSandboxBackend` (Docker and Podman).
+   - `ContainerSandboxBackend`: Manages isolated container spin-up, workspace volume mounting (`-v`), cgroups resource constraints (`--memory`, `--cpus`, `--pids-limit`), and isolated networking (`--network none`).
+   - `ContainerProcessRegistry`: Global process-level registry guaranteeing clean container teardown on exit, SIGINT, or crash.
    - `WorkspaceManager`: Ephemeral temporary directory provisioning, seed files injection, and Git baseline tracking.
    - `SecurityPolicyChecker`: Validates command blacklists and enforces strict path confinement.
-   - `CommandExecutor`: Spawns subprocesses with timeout management and output capping.
+   - `CommandExecutor`: Dispatches commands through the active backend with timeout management and output capping.
 
 4. **Trajectory Engine** (`src/trajectory/`):
    - `TrajectoryRecorder`: Tracks turns, tool calls, token budgets, and execution latency in real-time.
@@ -71,11 +74,13 @@ The harness is structured into 6 decoupled layers:
 Every scenario execution emits typed events across its lifecycle:
 
 1. `scenario:start`: Triggered when workspace setup completes and agent execution begins.
-2. `turn:start`: Agent starts a reasoning turn with user prompt and initial thoughts.
-3. `tool:start`: A native or mock tool execution commences with arguments.
-4. `tool:end`: Tool completes execution with exit code, stdout/stderr, and duration.
-5. `budget:warning`: Emitted when turn count or token consumption reaches 80% of defined budget.
-6. `turn:complete`: Turn wraps up with assistant message and token deltas.
-7. `status:change`: State transitions (`running` -> `completed` / `error` / `budget_exceeded` / `security_violation`).
-8. `scenario:complete`: Verification finished, final pass/fail report emitted.
+2. `sandbox:ready`: Triggered when container or local sandbox backend is provisioned and ready.
+3. `turn:start`: Agent starts a reasoning turn with user prompt and initial thoughts.
+4. `tool:start`: A native or mock tool execution commences with arguments.
+5. `tool:end`: Tool completes execution with exit code, stdout/stderr, and duration.
+6. `budget:warning`: Emitted when turn count or token consumption reaches 80% of defined budget.
+7. `turn:complete`: Turn wraps up with assistant message and token deltas.
+8. `status:change`: State transitions (`running` -> `completed` / `error` / `budget_exceeded` / `security_violation`).
+9. `scenario:complete`: Verification finished, final pass/fail report emitted.
+10. `sandbox:teardown`: Triggered when container is safely destroyed and resources released.
 
