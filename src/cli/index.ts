@@ -5,7 +5,7 @@ import path from "node:path";
 import yaml from "yaml";
 import chalk from "chalk";
 import { VERSION } from "../index.js";
-import { ScenarioDefinitionSchema } from "../core/schemas.js";
+import { ScenarioDefinitionSchema, SandboxConfigSchema } from "../core/schemas.js";
 import { AgentHarness } from "../core/harness.js";
 import { TrajectoryExporter } from "../trajectory/exporter.js";
 import { TerminalReporter } from "../reporters/terminal.js";
@@ -164,6 +164,9 @@ program
   .description("Run a scenario using a shell script/agent command")
   .requiredOption("-s, --scenario <path>", "Path to scenario file")
   .option("-c, --command <agentCmd>", "Agent command to execute inside workspace (e.g., codex exec, custom script)")
+  .option("--sandbox <type>", "Execution sandbox backend: local, docker, podman")
+  .option("--image <image>", "Container image for docker/podman sandbox")
+  .option("--container-network <network>", "Container network mode (none, host, bridge)")
   .option("--live", "Stream real-time trajectory execution events to the console")
   .option("--stream-jsonl <path>", "Stream real-time events in JSON Lines (NDJSON) format to file")
   .option("--report-json <path>", "Save report to JSON file")
@@ -172,6 +175,16 @@ program
   .action(async (options) => {
     try {
       const scenario = await loadScenario(options.scenario);
+      if (options.sandbox || options.image || options.containerNetwork) {
+        scenario.sandbox = SandboxConfigSchema.parse({
+          backend: options.sandbox || scenario.sandbox?.backend || 'local',
+          container: {
+            ...scenario.sandbox?.container,
+            image: options.image || scenario.sandbox?.container?.image || 'alpine:latest',
+            network: options.containerNetwork || scenario.sandbox?.container?.network || 'none',
+          },
+        });
+      }
       console.log(chalk.cyan(`Starting scenario run: ${scenario.name}`));
 
       const observers: TrajectoryStreamObserver[] = [];
