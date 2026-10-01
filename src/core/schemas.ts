@@ -76,7 +76,30 @@ export const ScenarioAssertionsSchema = z.object({
   trajectory: z.array(TrajectoryAssertionSchema).default([]),
 });
 
+
+export const ContainerConfigSchema = z.object({
+  image: z.string().default('alpine:latest'),
+  runtime: z.enum(['docker', 'podman', 'auto']).default('auto'),
+  workdir: z.string().default('/workspace'),
+  network: z.string().default('none'),
+  memoryLimit: z.string().optional(),
+  cpuLimit: z.number().positive().optional(),
+  pidsLimit: z.number().int().positive().optional(),
+  env: z.record(z.string(), z.string()).default({}),
+  user: z.string().optional(),
+  privileged: z.boolean().default(false),
+  removeOnExit: z.boolean().default(true),
+  pullPolicy: z.enum(['always', 'if-not-present', 'never']).default('if-not-present'),
+  extraArgs: z.array(z.string()).default([]),
+});
+
+export const SandboxConfigSchema = z.object({
+  backend: z.enum(['local', 'docker', 'podman']).default('local'),
+  container: ContainerConfigSchema.optional(),
+});
+
 export const ScenarioDefinitionSchema = z.object({
+  sandbox: SandboxConfigSchema.default(() => SandboxConfigSchema.parse({})),
   id: z.string().min(1).regex(/^[a-z0-9-_]+$/i, 'Scenario ID must be alphanumeric with hyphens or underscores'),
   name: z.string().min(1),
   description: z.string().default(''),

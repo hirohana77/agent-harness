@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   BudgetsSchema,
+  ContainerConfigSchema,
+  SandboxConfigSchema,
   SecurityPolicySchema,
   WorkspaceConfigSchema,
   TaskConfigSchema,
@@ -29,6 +31,8 @@ export type TrajectoryAssertion = z.infer<typeof TrajectoryAssertionSchema>;
 export type TrajectoryAssertionRule = z.infer<typeof TrajectoryAssertionRuleSchema>;
 export type ScenarioAssertions = z.infer<typeof ScenarioAssertionsSchema>;
 export type ScenarioDefinition = z.infer<typeof ScenarioDefinitionSchema>;
+export type ContainerConfig = z.infer<typeof ContainerConfigSchema>;
+export type SandboxConfig = z.infer<typeof SandboxConfigSchema>;
 
 export type ToolCall = z.infer<typeof ToolCallSchema>;
 export type ToolCallResult = z.infer<typeof ToolCallResultSchema>;

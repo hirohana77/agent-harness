@@ -10,6 +10,8 @@ export type TrajectoryEventType =
   | 'budget:warning'
   | 'status:change'
   | 'error'
+  | 'sandbox:ready'
+  | 'sandbox:teardown'
   | 'custom';
 
 export interface BaseTrajectoryEvent {
@@ -94,6 +96,21 @@ export interface ErrorEvent extends BaseTrajectoryEvent {
   stack?: string;
 }
 
+
+export interface SandboxReadyEvent extends BaseTrajectoryEvent {
+  type: 'sandbox:ready';
+  backend: 'local' | 'docker' | 'podman';
+  containerId?: string;
+  image?: string;
+}
+
+export interface SandboxTeardownEvent extends BaseTrajectoryEvent {
+  type: 'sandbox:teardown';
+  backend: 'local' | 'docker' | 'podman';
+  containerId?: string;
+  durationMs?: number;
+}
+
 export interface CustomEvent extends BaseTrajectoryEvent {
   type: 'custom';
   eventName: string;
@@ -110,6 +127,8 @@ export type TrajectoryEvent =
   | BudgetWarningEvent
   | StatusChangeEvent
   | ErrorEvent
+  | SandboxReadyEvent
+  | SandboxTeardownEvent
   | CustomEvent;
 
 export type EventPattern = TrajectoryEventType | `${string}:*` | '*';

@@ -49,3 +49,10 @@ export class HarnessAssertionError extends HarnessError {
     this.name = 'HarnessAssertionError';
   }
 }
+
+export class ContainerSandboxError extends HarnessError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'CONTAINER_SANDBOX_ERROR', details);
+    this.name = 'ContainerSandboxError';
+  }
+}
