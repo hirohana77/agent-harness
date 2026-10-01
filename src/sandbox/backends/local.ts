@@ -1,68 +1,27 @@
 import { spawn } from 'node:child_process';
-import { ToolCallResult } from '../core/types.js';
-import { SecurityPolicyChecker } from './security.js';
-import { SandboxBackend } from './types.js';
+import path from 'node:path';
+import { ToolCallResult } from '../../core/types.js';
+import { CommandExecutionOptions } from '../executor.js';
+import { SandboxBackend, SandboxBackendType } from '../types.js';
 
-export interface CommandExecutionOptions {
-  cwd?: string;
-  timeoutMs?: number;
-  env?: NodeJS.ProcessEnv;
-  signal?: AbortSignal;
-}
-
-export class CommandExecutor {
-  private security: SecurityPolicyChecker;
-  private defaultCwd?: string;
+export class LocalSandboxBackend implements SandboxBackend {
+  public readonly id: string;
+  public readonly type: SandboxBackendType = 'local';
+  private workspaceRoot?: string;
   private maxOutputBytes: number;
-  private backend?: SandboxBackend;
 
-  constructor(
-    security: SecurityPolicyChecker,
-    defaultCwd?: string,
-    maxOutputBytes = 1024 * 1024,
-    backend?: SandboxBackend
-  ) {
-    this.security = security;
-    this.defaultCwd = defaultCwd;
+  constructor(maxOutputBytes = 1024 * 1024) {
+    this.id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     this.maxOutputBytes = maxOutputBytes;
-    this.backend = backend;
   }
 
-  public getBackend(): SandboxBackend | undefined {
-    return this.backend;
+  public async setup(workspacePath: string): Promise<void> {
+    this.workspaceRoot = path.resolve(workspacePath);
   }
 
-  public setBackend(backend: SandboxBackend): void {
-    this.backend = backend;
-  }
-
-  /**
-   * Run a shell command securely within the sandbox
-   */
   public async execute(command: string, options: CommandExecutionOptions = {}): Promise<ToolCallResult> {
-    // 1. Security validation
-    try {
-      this.security.validateCommand(command);
-    } catch (err: unknown) {
-      return {
-        success: false,
-        error: (err as Error).message,
-        exitCode: 126,
-      };
-    }
-
-    const mergedOptions: CommandExecutionOptions = {
-      cwd: options.cwd ?? this.defaultCwd,
-      ...options,
-    };
-
-    // 2. Delegate to pluggable backend if configured
-    if (this.backend) {
-      return this.backend.execute(command, mergedOptions);
-    }
-
-    // 3. Fallback to direct host execution
     const timeout = options.timeoutMs ?? 15000;
+    const cwd = options.cwd ?? this.workspaceRoot;
 
     return new Promise<ToolCallResult>((resolve) => {
       let stdout = '';
@@ -70,7 +29,7 @@ export class CommandExecutor {
       let killed = false;
 
       const child = spawn(command, {
-        cwd: mergedOptions.cwd,
+        cwd,
         shell: true,
         env: {
           ...process.env,
@@ -139,5 +98,17 @@ export class CommandExecutor {
         });
       });
     });
+  }
+
+  public async teardown(): Promise<void> {
+    // No-op for local backend since workspace cleanup is handled by WorkspaceManager
+  }
+
+  public getWorkspaceRoot(): string {
+    return this.workspaceRoot || process.cwd();
+  }
+
+  public async isHealthy(): Promise<boolean> {
+    return true;
   }
 }

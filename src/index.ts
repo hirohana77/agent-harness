@@ -12,6 +12,7 @@ export * from './sandbox/types.js';
 export * from './sandbox/security.js';
 export * from './sandbox/workspace.js';
 export * from './sandbox/executor.js';
+export * from './sandbox/backends/index.js';
 export * from './trajectory/recorder.js';
 export * from './trajectory/replayer.js';
 export * from './trajectory/exporter.js';
