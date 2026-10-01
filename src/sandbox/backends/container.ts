@@ -1,4 +1,4 @@
-import { spawn, execFile } from 'node:child_process';
+import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { ToolCallResult, ContainerConfig } from '../../core/types.js';
@@ -8,37 +8,67 @@ import { ContainerSandboxError } from '../../core/errors.js';
 
 const execFileAsync = promisify(execFile);
 
-// Process-level active container registry to prevent orphaned containers
-const activeContainers = new Set<{ runtime: string; containerId: string }>();
+interface ActiveContainerEntry {
+  runtime: string;
+  containerName: string;
+}
 
-let exitHooksRegistered = false;
-function registerExitHooksOnce() {
-  if (exitHooksRegistered) return;
-  exitHooksRegistered = true;
+/**
+ * Singleton process registry to track and guarantee cleanup of containers across process lifecycle
+ */
+export class ContainerProcessRegistry {
+  private static activeContainers: Map<string, ActiveContainerEntry> = new Map();
+  private static hooksInstalled = false;
 
-  const cleanupSync = () => {
-    for (const { runtime, containerId } of activeContainers) {
+  public static register(runtime: string, containerName: string): void {
+    ContainerProcessRegistry.activeContainers.set(containerName, { runtime, containerName });
+    ContainerProcessRegistry.ensureHooks();
+  }
+
+  public static unregister(containerName: string): void {
+    ContainerProcessRegistry.activeContainers.delete(containerName);
+  }
+
+  public static getActiveCount(): number {
+    return ContainerProcessRegistry.activeContainers.size;
+  }
+
+  public static cleanupAll(): void {
+    for (const { runtime, containerName } of ContainerProcessRegistry.activeContainers.values()) {
       try {
-        require('node:child_process').execSync(`${runtime} rm -f ${containerId}`, {
+        spawnSync(runtime, ['rm', '-f', containerName], {
           stdio: 'ignore',
-          timeout: 5000,
+          timeout: 4000,
         });
       } catch {
-        // Ignore during shutdown
+        // Suppress during process exit
       }
     }
-    activeContainers.clear();
-  };
+    ContainerProcessRegistry.activeContainers.clear();
+  }
 
-  process.once('exit', cleanupSync);
-  process.once('SIGINT', () => {
-    cleanupSync();
-    process.exit(130);
-  });
-  process.once('SIGTERM', () => {
-    cleanupSync();
-    process.exit(143);
-  });
+  private static ensureHooks(): void {
+    if (ContainerProcessRegistry.hooksInstalled) return;
+    ContainerProcessRegistry.hooksInstalled = true;
+
+    const cleanup = () => {
+      ContainerProcessRegistry.cleanupAll();
+    };
+
+    process.once('exit', cleanup);
+    process.once('SIGINT', () => {
+      cleanup();
+      process.exit(130);
+    });
+    process.once('SIGTERM', () => {
+      cleanup();
+      process.exit(143);
+    });
+    process.once('SIGHUP', () => {
+      cleanup();
+      process.exit(129);
+    });
+  }
 }
 
 export class ContainerSandboxBackend implements SandboxBackend {
@@ -81,7 +111,6 @@ export class ContainerSandboxBackend implements SandboxBackend {
     this.containerWorkdir = this.config.workdir || '/workspace';
     this.containerName = `ah-sandbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.id = this.containerName;
-    registerExitHooksOnce();
   }
 
   public getContainerName(): string {
@@ -161,7 +190,7 @@ export class ContainerSandboxBackend implements SandboxBackend {
       const { stdout } = await execFileAsync(this.runtime, args);
       this.containerId = stdout.trim();
       this.isStarted = true;
-      activeContainers.add({ runtime: this.runtime, containerId: this.containerName });
+      ContainerProcessRegistry.register(this.runtime, this.containerName);
     } catch (err: unknown) {
       await this.teardown().catch(() => {});
       throw new ContainerSandboxError(
@@ -233,20 +262,25 @@ export class ContainerSandboxBackend implements SandboxBackend {
 
       const timer = setTimeout(() => {
         killed = true;
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // Process terminated
-          }
-        }, 1000);
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+        child.stdout?.destroy();
+        child.stderr?.destroy();
       }, timeout);
 
       if (options.signal) {
         options.signal.addEventListener('abort', () => {
           killed = true;
-          child.kill('SIGKILL');
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
+          child.stdout?.destroy();
+          child.stderr?.destroy();
         });
       }
 
@@ -296,7 +330,7 @@ export class ContainerSandboxBackend implements SandboxBackend {
   public async teardown(): Promise<void> {
     if (this.isCleanedUp) return;
     this.isCleanedUp = true;
-    activeContainers.delete({ runtime: this.runtime, containerId: this.containerName });
+    ContainerProcessRegistry.unregister(this.containerName);
 
     if (this.isStarted || this.containerName) {
       try {

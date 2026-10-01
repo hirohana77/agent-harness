@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { LocalSandboxBackend } from '../src/sandbox/backends/local.js';
-import { ContainerSandboxBackend } from '../src/sandbox/backends/container.js';
+import { ContainerSandboxBackend, ContainerProcessRegistry } from '../src/sandbox/backends/container.js';
 import { SandboxBackendFactory } from '../src/sandbox/backends/factory.js';
 import { ContainerSandboxError } from '../src/core/errors.js';
 
@@ -129,6 +129,13 @@ describe('ContainerSandboxBackend Unit / Mock', () => {
     expect(container.getWorkspaceRoot()).toBe('/workspace');
     expect(container.getContainerName()).toMatch(/^ah-sandbox-/);
   });
+
+  it('tracks container in ContainerProcessRegistry', () => {
+    ContainerProcessRegistry.register('docker', 'test-container-registry-1');
+    expect(ContainerProcessRegistry.getActiveCount()).toBeGreaterThanOrEqual(1);
+    ContainerProcessRegistry.unregister('test-container-registry-1');
+  });
+
 
   it('throws when executing on unstarted container', async () => {
     const container = new ContainerSandboxBackend({ image: 'alpine:latest' });

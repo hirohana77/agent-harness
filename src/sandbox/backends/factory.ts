@@ -21,7 +21,10 @@ export class SandboxBackendFactory {
     if (preferred === 'docker') {
       const ok = await SandboxBackendFactory.isRuntimeAvailable('docker');
       if (!ok) {
-        throw new ContainerSandboxError('Docker runtime requested but docker command is not available or daemon is unreachable.');
+        throw new ContainerSandboxError(
+          'Docker runtime requested but docker command is not available or daemon is unreachable. ' +
+          'Ensure Docker is installed and the daemon is running (e.g., `systemctl start docker` or launch Docker Desktop).'
+        );
       }
       return 'docker';
     }
@@ -29,12 +32,15 @@ export class SandboxBackendFactory {
     if (preferred === 'podman') {
       const ok = await SandboxBackendFactory.isRuntimeAvailable('podman');
       if (!ok) {
-        throw new ContainerSandboxError('Podman runtime requested but podman command is not available.');
+        throw new ContainerSandboxError(
+          'Podman runtime requested but podman command is not available. ' +
+          'Ensure Podman is installed and available in system PATH.'
+        );
       }
       return 'podman';
     }
 
-    // Auto detection: check docker then podman
+    // Auto detection: check docker first, then podman
     if (await SandboxBackendFactory.isRuntimeAvailable('docker')) {
       return 'docker';
     }
@@ -43,7 +49,7 @@ export class SandboxBackendFactory {
     }
 
     throw new ContainerSandboxError(
-      'No container runtime found. Please install Docker or Podman and ensure the daemon/service is active.'
+      'No active container runtime found. Docker or Podman must be installed and active for container sandbox execution.'
     );
   }
 
@@ -59,7 +65,7 @@ export class SandboxBackendFactory {
     }
 
     try {
-      await execFileAsync(runtime, ['info'], { timeout: 3000 });
+      await execFileAsync(runtime, ['info'], { timeout: 2000 });
       if (runtime === 'docker') cachedDockerAvailable = true;
       if (runtime === 'podman') cachedPodmanAvailable = true;
       return true;
@@ -71,7 +77,7 @@ export class SandboxBackendFactory {
   }
 
   /**
-   * Reset runtime detection cache (e.g. for testing)
+   * Reset runtime detection cache (useful for testing and dynamic reconnects)
    */
   public static resetCache(): void {
     cachedDockerAvailable = null;
