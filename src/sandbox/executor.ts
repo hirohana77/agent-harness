@@ -81,14 +81,13 @@ export class CommandExecutor {
 
       const timer = setTimeout(() => {
         killed = true;
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // Already dead
-          }
-        }, 1000);
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+        child.stdout?.destroy();
+        child.stderr?.destroy();
       }, timeout);
 
       if (options.signal) {
