@@ -32,3 +32,5 @@ export interface BenchmarkSummary {
   totalCostUsd: number;
   results: BenchmarkScenarioResult[];
 }
+
+export * from './swebench/types.js';

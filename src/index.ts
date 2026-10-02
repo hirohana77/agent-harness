@@ -32,3 +32,4 @@ export * from './benchmark/runner.js';
 export * from './events/types.js';
 export * from './events/bus.js';
 export * from './events/observers/index.js';
+export * from './benchmark/swebench/index.js';
