@@ -13,6 +13,7 @@
 ## 核心特性
 
 - 🐳 **可插拔沙箱后端 (Docker & Podman)**：支持轻量级本地环境与全虚拟化 Docker / Podman 容器驱动，提供 cgroups 资源限制（内存、CPU、进程数）与完全网络隔离（`network: none`）。
+- 🏆 **SWE-bench 任务集适配器与评测引擎**：原生支持导入 SWE-bench / Lite / Verified JSONL 格式任务集，自动装配专属容器镜像、提取 `FAIL_TO_PASS` 与 `PASS_TO_PASS` 测试断言，并支持一键统计 Resolve 成功率与导出官方格式 Predictions。
 - 🛡️ **隔离工作区与路径约束**：动态创建隔离临时工作区，初始化 Git 独立环境，强制约束文件路径不得越权逃逸。
 - 🔒 **安全守卫策略**：拦截危险命令（如 `rm -rf /`、未授权网络请求等），防止智能体误操作破坏宿主系统。
 - ⏱️ **确定性轨迹记录**：全流程精细化记录 Agent 的轮次（Turn）、思考过程（Thought）、工具调用（Tool Calls）、Token 消耗与耗时。
@@ -73,6 +74,62 @@ agent-harness run \
 agent-harness replay \
   --scenario ./my-scenario.yaml \
   --trajectory ./trajectory.json
+```
+
+---
+
+## SWE-bench 任务集导入与评测工作流
+
+`agent-harness` 提供了开箱即用的 SWE-bench 数据集导入与自动化评测支持。
+
+### 查看数据集摘要统计
+```bash
+agent-harness swebench info -i ./swe-bench-lite.jsonl
+```
+
+### 批量转换为 Harness 场景配置
+```bash
+agent-harness swebench import \
+  -i ./swe-bench-lite.jsonl \
+  -o ./scenarios/swebench/ \
+  --format yaml \
+  --sandbox docker \
+  --image-prefix "swebench/sweb.eval.x86_64."
+```
+
+### 评估 Agent Predictions 补丁产物
+```bash
+agent-harness swebench eval \
+  -d ./swe-bench-lite.jsonl \
+  -p ./predictions.json \
+  -o ./swebench-summary.json
+```
+
+### 通过 SDK 运行 SWE-bench 评测
+
+```typescript
+import { BenchmarkRunner, SWEBenchAdapter, SWEBenchEvaluator } from 'agent-harness';
+
+const { summary, swebench } = await BenchmarkRunner.runSWEBench(
+  {
+    datasetPath: './swe-bench-lite.jsonl',
+    concurrency: 4,
+    adapterOptions: {
+      sandboxBackend: 'docker',
+      memoryLimit: '4g',
+      cpuLimit: 2.0,
+    },
+  },
+  async (ctx) => {
+    // 智能体自主定位代码并打补丁
+    ctx.recorder.startTurn('分析并修复 issue');
+    await ctx.executor.execute('git apply eval_test.patch');
+    ctx.recorder.completeTurn('修复完成');
+  }
+);
+
+console.log(`解决率 (Resolved Rate): ${swebench.resolveRatePercent}%`);
+console.log(`解决实例: ${swebench.resolvedInstances} / ${swebench.totalInstances}`);
 ```
 
 ---

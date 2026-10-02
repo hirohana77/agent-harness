@@ -14,6 +14,7 @@
 ## Highlights
 
 - **Pluggable Sandbox Backends**: Run benchmarks in lightweight local temporary environments or fully virtualized **Docker / Podman** containers with cgroups resource limits and network isolation.
+- **SWE-bench Task Adapter & Evaluation Engine**: Seamlessly import SWE-bench, SWE-bench Lite, and SWE-bench Verified tasks from JSONL; automatically bind container images, inject `FAIL_TO_PASS` and `PASS_TO_PASS` test assertions, and compute standard resolution rates.
 - **Isolated Workspace**: Dynamically provisions ephemeral workspaces with git baseline snapshots and strict path confinement.
 - **Security Guardrails**: Enforces command pattern blacklists and prevents host traversal attacks.
 - **Deterministic Trajectories**: Captures step-by-step agent turns, tool calls, token usage, latency, and costs.
@@ -70,6 +71,63 @@ agent-harness run \
 agent-harness replay \
   --scenario ./scenario.yaml \
   --trajectory ./trajectory.json
+```
+
+---
+
+## SWE-bench Dataset Integration & Evaluation
+
+`agent-harness` provides end-to-end tooling to convert official SWE-bench JSONL task sets into harness evaluation suites and calculate resolved metrics.
+
+### Inspect SWE-bench Dataset
+```bash
+agent-harness swebench info --input ./swe-bench-lite.jsonl
+```
+
+### Import Tasks into Harness Scenarios
+```bash
+agent-harness swebench import \
+  --input ./swe-bench-lite.jsonl \
+  --output ./scenarios/swebench/ \
+  --format yaml \
+  --sandbox docker \
+  --image-prefix "swebench/sweb.eval.x86_64."
+```
+
+### Evaluate Agent Predictions
+```bash
+agent-harness swebench eval \
+  --dataset ./swe-bench-lite.jsonl \
+  --predictions ./predictions.json \
+  --output ./swebench-summary.json
+```
+
+### Programmatic Benchmark Execution
+
+```typescript
+import { BenchmarkRunner, SWEBenchAdapter, SWEBenchEvaluator } from 'agent-harness';
+
+// Run entire SWE-bench task set against an autonomous agent
+const { summary, swebench } = await BenchmarkRunner.runSWEBench(
+  {
+    datasetPath: './swe-bench-lite.jsonl',
+    concurrency: 4,
+    adapterOptions: {
+      sandboxBackend: 'docker',
+      memoryLimit: '4g',
+      cpuLimit: 2.0,
+    },
+  },
+  async (ctx) => {
+    // Agent execution loop
+    ctx.recorder.startTurn('Resolving bug in target repository');
+    await ctx.executor.execute('git apply eval_test.patch');
+    ctx.recorder.completeTurn('Fix applied');
+  }
+);
+
+console.log(`SWE-bench Resolved Rate: ${swebench.resolveRatePercent}%`);
+console.log(`Passed: ${swebench.resolvedInstances} / ${swebench.totalInstances}`);
 ```
 
 ---
