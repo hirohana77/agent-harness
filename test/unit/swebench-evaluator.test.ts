@@ -166,3 +166,10 @@ tests/test_suite.py::test_baseline_behavior FAILED
     }
   });
 });
+
+  it('strips ANSI color escape codes before parsing test outputs', () => {
+    const ansiColored = '\u001b[32mtests/test_foo.py::test_fix_behavior PASSED\u001b[0m\n\u001b[31mtests/test_bar.py::test_bug FAILED\u001b[0m';
+    const parsed = SWEBenchEvaluator.parseTestOutput(ansiColored);
+    expect(parsed.passedTests.has('tests/test_foo.py::test_fix_behavior')).toBe(true);
+    expect(parsed.failedTests.has('tests/test_bar.py::test_bug')).toBe(true);
+  });

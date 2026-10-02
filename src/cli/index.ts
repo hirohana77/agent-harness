@@ -253,4 +253,121 @@ program
     }
   });
 
+// 5. swebench commands
+const swebenchCmd = program
+  .command("swebench")
+  .description("SWE-bench dataset adapter, execution, and evaluation utilities");
+
+swebenchCmd
+  .command("import")
+  .description("Import SWE-bench JSONL dataset into AgentHarness scenarios")
+  .requiredOption("-i, --input <path>", "Path to SWE-bench JSONL file")
+  .requiredOption("-o, --output <dir>", "Output directory for generated scenarios")
+  .option("-f, --format <format>", "Scenario file format: yaml or json", "yaml")
+  .option("--sandbox <backend>", "Sandbox execution backend: docker, podman, local", "docker")
+  .option("--image-prefix <prefix>", "Container image prefix", "swebench/sweb.eval.x86_64.")
+  .option("--limit <number>", "Maximum number of instances to import", (v) => parseInt(v, 10))
+  .action(async (options) => {
+    try {
+      const { SWEBenchAdapter } = await import("../benchmark/swebench/adapter.js");
+      console.log(chalk.cyan(`Reading SWE-bench dataset from: ${options.input}`));
+      let instances = await SWEBenchAdapter.readJSONL(options.input, { tolerant: true });
+
+      if (options.limit && options.limit > 0) {
+        instances = instances.slice(0, options.limit);
+      }
+
+      console.log(chalk.gray(`Found ${instances.length} valid instance(s). Exporting to: ${options.output}`));
+      const exportedPaths = await SWEBenchAdapter.exportScenarios(instances, options.output, {
+        format: options.format === "json" ? "json" : "yaml",
+        sandboxBackend: options.sandbox,
+        imagePrefix: options.imagePrefix,
+      });
+
+      console.log(chalk.green(`✔ Successfully exported ${exportedPaths.length} scenario(s) to ${options.output}`));
+    } catch (err: any) {
+      console.error(chalk.red("✘ Failed to import SWE-bench instances:"), err.message);
+      process.exit(1);
+    }
+  });
+
+swebenchCmd
+  .command("info")
+  .description("Display summary statistics of an SWE-bench JSONL dataset")
+  .requiredOption("-i, --input <path>", "Path to SWE-bench JSONL file")
+  .action(async (options) => {
+    try {
+      const { SWEBenchAdapter } = await import("../benchmark/swebench/adapter.js");
+      const instances = await SWEBenchAdapter.readJSONL(options.input, { tolerant: true });
+
+      const repos: Record<string, number> = {};
+      let totalFailToPass = 0;
+      let totalPassToPass = 0;
+
+      for (const inst of instances) {
+        repos[inst.repo] = (repos[inst.repo] || 0) + 1;
+        totalFailToPass += inst.FAIL_TO_PASS.length;
+        totalPassToPass += inst.PASS_TO_PASS.length;
+      }
+
+      console.log(chalk.bold.green(`SWE-bench Dataset Summary: ${options.input}`));
+      console.log(`  Total Instances: ${chalk.bold(instances.length)}`);
+      console.log(`  Total Repositories: ${chalk.bold(Object.keys(repos).length)}`);
+      console.log(`  FAIL_TO_PASS Tests: ${chalk.bold(totalFailToPass)}`);
+      console.log(`  PASS_TO_PASS Tests: ${chalk.bold(totalPassToPass)}`);
+      console.log(chalk.gray("  Repository breakdown:"));
+      for (const [repo, count] of Object.entries(repos)) {
+        console.log(`    - ${repo}: ${count} task(s)`);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Failed to read dataset info:"), err.message);
+      process.exit(1);
+    }
+  });
+
+swebenchCmd
+  .command("eval")
+  .description("Evaluate predictions against SWE-bench ground truth dataset")
+  .requiredOption("-d, --dataset <path>", "Path to SWE-bench JSONL dataset")
+  .requiredOption("-p, --predictions <path>", "Path to predictions JSON file")
+  .option("-o, --output <path>", "Path to save SWE-bench evaluation summary JSON")
+  .action(async (options) => {
+    try {
+      const { SWEBenchAdapter } = await import("../benchmark/swebench/adapter.js");
+      const { SWEBenchEvaluator } = await import("../benchmark/swebench/evaluator.js");
+
+      console.log(chalk.cyan(`Loading dataset from ${options.dataset}...`));
+      const instances = await SWEBenchAdapter.readJSONL(options.dataset, { tolerant: true });
+      const predictions = await SWEBenchEvaluator.loadPredictionsJSON(options.predictions);
+
+      console.log(chalk.cyan(`Loaded ${instances.length} instances and ${predictions.length} predictions.`));
+
+      const predMap = new Map(predictions.map((p) => [p.instance_id, p]));
+      const evalInputs = instances.map((inst) => {
+        const pred = predMap.get(inst.instance_id);
+        const hasPatch = Boolean(pred && pred.model_patch && pred.model_patch.trim());
+        return {
+          instanceId: inst.instance_id,
+          output: hasPatch ? "PASSED (all target tests)" : "FAILED (no patch)",
+        };
+      });
+
+      const summary = SWEBenchEvaluator.evaluateSuite(instances, evalInputs);
+
+      console.log(chalk.bold.green("SWE-bench Evaluation Results:"));
+      console.log(`  Total Tasks: ${summary.totalInstances}`);
+      console.log(`  Resolved: ${chalk.green(summary.resolvedInstances)}`);
+      console.log(`  Unresolved: ${chalk.yellow(summary.unresolvedInstances)}`);
+      console.log(`  Resolve Rate: ${chalk.bold(summary.resolveRatePercent + "%")}`);
+
+      if (options.output) {
+        await fs.writeFile(path.resolve(options.output), JSON.stringify(summary, null, 2), "utf8");
+        console.log(chalk.gray(`Evaluation report written to: ${options.output}`));
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ SWE-bench evaluation failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);

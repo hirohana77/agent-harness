@@ -19,49 +19,61 @@ export interface ParsedTestResults {
 
 export class SWEBenchEvaluator {
   /**
+   * Strip ANSI terminal escape sequences (colors, cursors, etc.).
+   */
+  public static stripAnsi(text: string): string {
+    return text.replace(
+      // eslint-disable-next-line no-control-regex
+      /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+      ''
+    );
+  }
+
+  /**
    * Parse test execution output from pytest or python unittest runners.
    */
   public static parseTestOutput(rawOutput: string): ParsedTestResults {
+    const cleanOutput = this.stripAnsi(rawOutput);
     const passedTests = new Set<string>();
     const failedTests = new Set<string>();
     const skippedTests = new Set<string>();
 
-    const lines = rawOutput.split('\n');
+    const lines = cleanOutput.split('\n');
 
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
       // 1. Pytest format: test_path.py::test_func PASSED
-      const pytestPassMatch = trimmed.match(/^([\S]+)\s+PASSED/);
+      const pytestPassMatch = trimmed.match(/^([\S]+)\s+(?:PASSED|XPASS)/i);
       if (pytestPassMatch) {
         passedTests.add(pytestPassMatch[1]);
         continue;
       }
 
       // Pytest format: PASSED test_path.py::test_func
-      const pytestPassPrefixMatch = trimmed.match(/^PASSED\s+([\S]+)/);
+      const pytestPassPrefixMatch = trimmed.match(/^(?:PASSED|XPASS)\s+([\S]+)/i);
       if (pytestPassPrefixMatch) {
         passedTests.add(pytestPassPrefixMatch[1]);
         continue;
       }
 
       // Pytest format: test_path.py::test_func FAILED or ERROR
-      const pytestFailMatch = trimmed.match(/^([\S]+)\s+(FAILED|ERROR)/);
+      const pytestFailMatch = trimmed.match(/^([\S]+)\s+(?:FAILED|ERROR)/i);
       if (pytestFailMatch) {
         failedTests.add(pytestFailMatch[1]);
         continue;
       }
 
       // Pytest format: FAILED test_path.py::test_func or ERROR test_path.py::test_func
-      const pytestFailPrefixMatch = trimmed.match(/^(?:FAILED|ERROR)\s+([\S]+)/);
+      const pytestFailPrefixMatch = trimmed.match(/^(?:FAILED|ERROR)\s+([\S]+)/i);
       if (pytestFailPrefixMatch) {
         failedTests.add(pytestFailPrefixMatch[1]);
         continue;
       }
 
-      // Pytest format: test_path.py::test_func SKIPPED
-      const pytestSkipMatch = trimmed.match(/^([\S]+)\s+SKIPPED/);
+      // Pytest format: test_path.py::test_func SKIPPED / XFAIL
+      const pytestSkipMatch = trimmed.match(/^([\S]+)\s+(?:SKIPPED|XFAIL)/i);
       if (pytestSkipMatch) {
         skippedTests.add(pytestSkipMatch[1]);
         continue;
@@ -88,7 +100,7 @@ export class SWEBenchEvaluator {
   /**
    * Helper to determine whether a target test identifier matches parsed test names.
    */
-  private static matchTestInSet(target: string, testSet: Set<string>): boolean {
+  public static matchTestInSet(target: string, testSet: Set<string>): boolean {
     if (testSet.has(target)) return true;
 
     // Normalize separators (: to ., / to .)
@@ -99,7 +111,18 @@ export class SWEBenchEvaluator {
       const normalizedItem = item.replace(/[:/\\]+/g, '.');
       if (normalizedItem === normalizedTarget) return true;
 
-      // Suffix or leaf match (e.g. test_something matching tests.mod::TestClass::test_something)
+      // Extract test function name from target (e.g. test_func from test_file.py::TestClass::test_func or module.TestClass.test_func)
+      const targetParts = target.split(/[:./\\]+/);
+      const targetBase = targetParts[targetParts.length - 1];
+
+      const itemParts = item.split(/[:./\\]+/);
+      const itemBase = itemParts[itemParts.length - 1];
+
+      if (targetBase && itemBase && targetBase === itemBase) {
+        return true;
+      }
+
+      // Suffix match
       if (item.endsWith(target) || target.endsWith(item)) return true;
       if (normalizedItem.endsWith(normalizedTarget) || normalizedTarget.endsWith(normalizedItem)) return true;
     }
@@ -179,7 +202,7 @@ export class SWEBenchEvaluator {
         status = 'PASSED';
       }
 
-      // If PASS_TO_PASS was not re-run, by default assume passed unless explicit failure
+      // If PASS_TO_PASS was not explicitly failed, assume passed unless observed failure
       const passed = status !== 'FAILED';
       if (passed) passToPassPassed++;
 
@@ -207,7 +230,7 @@ export class SWEBenchEvaluator {
       resolution = 'UNRESOLVED';
     }
 
-    // Check for hard errors (e.g. command fatal exit with syntax error or missing runner)
+    // Check for hard fatal errors (e.g. syntax error or runner crash)
     if (!resolved && (rawOutput.includes('SyntaxError:') || rawOutput.includes('ModuleNotFoundError:'))) {
       resolution = 'ERROR';
     }

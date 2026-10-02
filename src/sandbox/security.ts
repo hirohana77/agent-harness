@@ -71,7 +71,7 @@ export class SecurityPolicyChecker {
   private matchesPattern(command: string, pattern: string): boolean {
     if (pattern.includes("*")) {
       const regexStr = "^" + pattern.split("*").map(s => s.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")).join(".*") + "$";
-      const regex = new RegExp(regexStr, "i");
+      const regex = new RegExp(regexStr, "is");
       return regex.test(command);
     }
     return command.includes(pattern);

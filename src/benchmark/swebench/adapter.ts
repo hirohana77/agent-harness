@@ -1,10 +1,17 @@
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import readline from 'node:readline';
 import path from 'node:path';
 import YAML from 'yaml';
 import { ScenarioDefinition } from '../../core/types.js';
 import { ScenarioDefinitionSchema } from '../../core/schemas.js';
 import { SWEBenchInstance, SWEBenchAdapterOptions } from './types.js';
 import { SWEBenchInstanceRawSchema, SWEBenchAdapterOptionsSchema } from './schemas.js';
+
+export interface ParseJSONLOptions {
+  tolerant?: boolean;
+  onWarning?: (err: Error, lineIndex: number) => void;
+}
 
 export class SWEBenchAdapter {
   /**
@@ -31,7 +38,7 @@ export class SWEBenchAdapter {
   /**
    * Parse a JSONL string containing SWE-bench task instances.
    */
-  public static parseJSONL(content: string): SWEBenchInstance[] {
+  public static parseJSONL(content: string, options?: ParseJSONLOptions): SWEBenchInstance[] {
     const lines = content.split('\n');
     const instances: SWEBenchInstance[] = [];
 
@@ -43,6 +50,10 @@ export class SWEBenchAdapter {
         const raw = JSON.parse(line);
         instances.push(this.parseInstance(raw));
       } catch (err: any) {
+        if (options?.tolerant) {
+          options.onWarning?.(err, i);
+          continue;
+        }
         throw new Error(`Failed to parse SWE-bench JSONL at line ${i + 1}: ${err.message}`);
       }
     }
@@ -51,11 +62,58 @@ export class SWEBenchAdapter {
   }
 
   /**
-   * Read SWE-bench instances from a JSONL file.
+   * Streamingly read SWE-bench instances from a JSONL file line-by-line.
+   * Efficient for multi-hundred-megabyte benchmark files.
    */
-  public static async readJSONL(filePath: string): Promise<SWEBenchInstance[]> {
-    const raw = await fs.readFile(filePath, 'utf8');
-    return this.parseJSONL(raw);
+  public static async readJSONLStream(
+    filePath: string,
+    onInstance: (instance: SWEBenchInstance, index: number) => Promise<void> | void,
+    options?: ParseJSONLOptions
+  ): Promise<number> {
+    const fileStream = createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity,
+    });
+
+    let index = 0;
+    let processed = 0;
+
+    for await (const line of rl) {
+      index++;
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      try {
+        const raw = JSON.parse(trimmed);
+        const inst = this.parseInstance(raw);
+        await onInstance(inst, processed);
+        processed++;
+      } catch (err: any) {
+        if (options?.tolerant) {
+          options.onWarning?.(err, index);
+          continue;
+        }
+        throw new Error(`Failed to stream SWE-bench JSONL at line ${index}: ${err.message}`);
+      }
+    }
+
+    return processed;
+  }
+
+  /**
+   * Read SWE-bench instances from a JSONL file into memory.
+   */
+  public static async readJSONL(filePath: string, options?: ParseJSONLOptions): Promise<SWEBenchInstance[]> {
+    const instances: SWEBenchInstance[] = [];
+    await this.readJSONLStream(
+      filePath,
+      (inst) => {
+        instances.push(inst);
+      },
+      options
+    );
+    return instances;
   }
 
   /**
@@ -87,8 +145,12 @@ export class SWEBenchAdapter {
 
   /**
    * Generate test command to execute FAIL_TO_PASS tests for evaluation.
+   * Leverages repository-specific conventions (e.g. Django, SymPy) with fallback to pytest.
    */
-  public static generateEvalCommand(instance: SWEBenchInstance, customCommand?: string | ((inst: SWEBenchInstance) => string)): string {
+  public static generateEvalCommand(
+    instance: SWEBenchInstance,
+    customCommand?: string | ((inst: SWEBenchInstance) => string)
+  ): string {
     if (typeof customCommand === 'function') {
       return customCommand(instance);
     }
@@ -97,12 +159,22 @@ export class SWEBenchAdapter {
     }
 
     const testTargets = [...instance.FAIL_TO_PASS];
+    const joinedTests = testTargets.join(' ');
+
+    const repoLower = instance.repo.toLowerCase();
+    if (repoLower.includes('django')) {
+      return testTargets.length > 0
+        ? `./tests/runtests.py --verbosity 2 --settings=test_sqlite ${joinedTests}`
+        : `./tests/runtests.py --verbosity 2 --settings=test_sqlite`;
+    }
+    if (repoLower.includes('sympy')) {
+      return testTargets.length > 0 ? `bin/test -C ${joinedTests}` : `bin/test`;
+    }
+
     if (testTargets.length === 0) {
       return 'pytest -v';
     }
 
-    // Default pytest execution command for python repositories
-    const joinedTests = testTargets.join(' ');
     return `pytest -v ${joinedTests}`;
   }
 

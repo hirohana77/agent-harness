@@ -20,6 +20,15 @@ describe('SWEBenchAdapter', () => {
     PASS_TO_PASS: ['tests.auth_tests.test_validators.UsernameValidatorsTests.test_unicode_validator'],
   };
 
+  const genericInstance: SWEBenchInstance = {
+    instance_id: 'requests__requests-100',
+    repo: 'psf/requests',
+    base_commit: 'deadbeef',
+    problem_statement: 'Redirect bug',
+    FAIL_TO_PASS: ['tests/test_requests.py::test_redirect'],
+    PASS_TO_PASS: ['tests/test_requests.py::test_get'],
+  };
+
   it('correctly parses raw instance with array tests', () => {
     const parsed = SWEBenchAdapter.parseInstance(sampleInstance);
     expect(parsed.instance_id).toBe('django__django-11099');
@@ -54,12 +63,7 @@ describe('SWEBenchAdapter', () => {
 
   it('parses JSONL content properly', () => {
     const line1 = JSON.stringify(sampleInstance);
-    const line2 = JSON.stringify({
-      instance_id: 'requests__requests-100',
-      repo: 'psf/requests',
-      FAIL_TO_PASS: ['test_redirect'],
-      PASS_TO_PASS: [],
-    });
+    const line2 = JSON.stringify(genericInstance);
     const jsonl = `${line1}\n\n${line2}\n`;
 
     const instances = SWEBenchAdapter.parseJSONL(jsonl);
@@ -102,9 +106,12 @@ describe('SWEBenchAdapter', () => {
     expect(explicitImg).toBe('ubuntu:22.04');
   });
 
-  it('generates eval test command', () => {
-    const cmd = SWEBenchAdapter.generateEvalCommand(sampleInstance);
-    expect(cmd).toBe('pytest -v tests.auth_tests.test_validators.UsernameValidatorsTests.test_ascii_validator');
+  it('generates eval test command with pytest and repo-specific runners', () => {
+    const genericCmd = SWEBenchAdapter.generateEvalCommand(genericInstance);
+    expect(genericCmd).toBe('pytest -v tests/test_requests.py::test_redirect');
+
+    const djangoCmd = SWEBenchAdapter.generateEvalCommand(sampleInstance);
+    expect(djangoCmd).toContain('runtests.py');
 
     const customCmd = SWEBenchAdapter.generateEvalCommand(sampleInstance, 'tox -e py39');
     expect(customCmd).toBe('tox -e py39');
@@ -114,7 +121,7 @@ describe('SWEBenchAdapter', () => {
   });
 
   it('converts SWE-bench instance to a valid ScenarioDefinition schema', () => {
-    const scenario = SWEBenchAdapter.toScenario(sampleInstance, {
+    const scenario = SWEBenchAdapter.toScenario(genericInstance, {
       sandboxBackend: 'docker',
       includeHints: true,
       defaultMaxTurns: 25,
@@ -123,15 +130,13 @@ describe('SWEBenchAdapter', () => {
 
     // Validate with strict zod schema
     const validated = ScenarioDefinitionSchema.parse(scenario);
-    expect(validated.id).toBe('django__django-11099');
-    expect(validated.name).toContain('SWE-bench: django__django-11099');
+    expect(validated.id).toBe('requests__requests-100');
+    expect(validated.name).toContain('SWE-bench: requests__requests-100');
     expect(validated.sandbox.backend).toBe('docker');
-    expect(validated.sandbox.container?.image).toContain('django__django-11099');
+    expect(validated.sandbox.container?.image).toContain('requests__requests-100');
     expect(validated.budgets.maxTurns).toBe(25);
     expect(validated.budgets.timeoutMs).toBe(120000);
-    expect(validated.workspace.initialFiles['eval_test.patch']).toBe(sampleInstance.test_patch);
-    expect(validated.workspace.initialFiles['golden.patch']).toBe(sampleInstance.patch);
-    expect(validated.workspace.initialFiles['SWE_BENCH_TASK.md']).toContain('Check ASCIIUsernameValidator regex pattern');
+    expect(validated.workspace.initialFiles['SWE_BENCH_TASK.md']).toContain('Redirect bug');
     expect(validated.assertions.commands).toHaveLength(1);
     expect(validated.assertions.commands[0].command).toContain('pytest -v');
   });
@@ -148,5 +153,60 @@ describe('SWEBenchAdapter', () => {
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('streams JSONL reading without keeping entire file in memory and handles tolerant mode', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-stream-'));
+    try {
+      const jsonlPath = path.join(tmpDir, 'stream.jsonl');
+      const lines = [
+        JSON.stringify(sampleInstance),
+        'corrupt line { not valid json',
+        JSON.stringify({
+          instance_id: 'sample__repo-2',
+          repo: 'sample/repo',
+          FAIL_TO_PASS: ['test_x'],
+          PASS_TO_PASS: [],
+        }),
+      ];
+      await fs.writeFile(jsonlPath, lines.join('\n'), 'utf8');
+
+      const collected: SWEBenchInstance[] = [];
+      const warnings: Error[] = [];
+
+      const count = await SWEBenchAdapter.readJSONLStream(
+        jsonlPath,
+        (inst) => {
+          collected.push(inst);
+        },
+        {
+          tolerant: true,
+          onWarning: (err) => {
+            warnings.push(err);
+          },
+        }
+      );
+
+      expect(count).toBe(2);
+      expect(collected).toHaveLength(2);
+      expect(warnings).toHaveLength(1);
+      expect(collected[0].instance_id).toBe('django__django-11099');
+      expect(collected[1].instance_id).toBe('sample__repo-2');
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('selects repository-specific test runner commands for known repositories', () => {
+    const sympyInst: SWEBenchInstance = {
+      instance_id: 'sympy__sympy-1',
+      repo: 'sympy/sympy',
+      base_commit: '123',
+      problem_statement: 'test',
+      FAIL_TO_PASS: ['test_bar'],
+      PASS_TO_PASS: [],
+    };
+    expect(SWEBenchAdapter.generateEvalCommand(sampleInstance)).toContain('runtests.py');
+    expect(SWEBenchAdapter.generateEvalCommand(sympyInst)).toContain('bin/test');
   });
 });
