@@ -1,3 +1,4 @@
+import { ASTAssertionSchema } from '../verifier/ast/schemas.js';
 import { z } from 'zod';
 
 export const BudgetsSchema = z.object({
@@ -74,6 +75,7 @@ export const ScenarioAssertionsSchema = z.object({
   files: z.array(FileAssertionSchema).default([]),
   commands: z.array(CommandAssertionSchema).default([]),
   trajectory: z.array(TrajectoryAssertionSchema).default([]),
+  ast: z.array(ASTAssertionSchema).default([]),
 });
 
 
@@ -172,7 +174,7 @@ export const TrajectorySchema = z.object({
 });
 
 export const AssertionItemResultSchema = z.object({
-  type: z.enum(['file', 'command', 'trajectory']),
+  type: z.enum(['file', 'command', 'trajectory', 'ast']),
   target: z.string(),
   passed: z.boolean(),
   message: z.string(),

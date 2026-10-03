@@ -71,3 +71,5 @@ export interface AgentRunResult {
 export type TrajectoryStatus = Trajectory['status'];
 
 export type AssertionResult = AssertionItemResult;
+
+export * from '../verifier/ast/types.js';
