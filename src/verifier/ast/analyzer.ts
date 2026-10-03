@@ -250,7 +250,7 @@ export class ASTAnalyzer {
 
         const properties: Array<{ name: string; type?: string; optional: boolean }> = [];
         for (const member of node.members) {
-          if (ts.isPropertySignature(member) && member.name) {
+          if ((ts.isPropertySignature(member) || ts.isMethodSignature(member)) && member.name) {
             properties.push({
               name: member.name.getText(this.sourceFile),
               type: member.type?.getText(this.sourceFile),
@@ -525,7 +525,18 @@ export class ASTAnalyzer {
 
       // 7. nested_ternary
       if (forbiddenSet.has('nested_ternary') && ts.isConditionalExpression(node)) {
-        if (parent && ts.isConditionalExpression(parent)) {
+        const unwrap = (n: ts.Node): ts.Node => {
+          let curr = n;
+          while (ts.isParenthesizedExpression(curr)) {
+            curr = curr.expression;
+          }
+          return curr;
+        };
+        const hasNestedChild =
+          ts.isConditionalExpression(unwrap(node.whenTrue)) ||
+          ts.isConditionalExpression(unwrap(node.whenFalse)) ||
+          ts.isConditionalExpression(unwrap(node.condition));
+        if (hasNestedChild) {
           violations.push({
             kind: 'nested_ternary',
             message: 'Forbidden nested ternary conditional expression detected',
