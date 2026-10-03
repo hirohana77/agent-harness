@@ -147,4 +147,55 @@ describe('Verifier Engine', () => {
     expect(report.metrics.passedAssertions).toBe(3);
     expect(report.metrics.failedAssertions).toBe(0);
   });
+
+  it('runs scenario verifier with AST semantic assertions', async () => {
+    await ws.writeFile('src/app.ts', 'export async function startServer(port: number): Promise<void> { /* clean */ }');
+
+    const scenario = ScenarioDefinitionSchema.parse({
+      id: 'sc-ast',
+      name: 'AST Scenario',
+      task: { instruction: 'write server' },
+      assertions: {
+        ast: [
+          {
+            path: 'src/app.ts',
+            rules: [
+              {
+                rule: 'has_function',
+                name: 'startServer',
+                isAsync: true,
+                isExported: true,
+                paramNames: ['port'],
+              },
+              {
+                rule: 'no_forbidden_syntax',
+                forbidden: ['eval', 'debugger'],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const sv = new ScenarioVerifier(scenario, ws, executor);
+    const mockTraj: Trajectory = {
+      scenarioId: 'sc-ast',
+      startedAt: new Date().toISOString(),
+      durationMs: 50,
+      status: 'completed',
+      turns: [],
+      summary: {
+        totalTurns: 0,
+        totalToolCalls: 0,
+        totalTokens: 0,
+        completed: true,
+      },
+    };
+
+    const report = await sv.verify(mockTraj);
+    expect(report.passed).toBe(true);
+    expect(report.assertionResults.some((r) => r.type === 'ast')).toBe(true);
+    expect(report.metrics.passedAssertions).toBe(2);
+    expect(report.metrics.failedAssertions).toBe(0);
+  });
 });

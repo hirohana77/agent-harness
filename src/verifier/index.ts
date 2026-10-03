@@ -2,6 +2,7 @@ import { ScenarioDefinition, Trajectory, HarnessReport, AssertionItemResult } fr
 import { FileVerifier } from "./file-verifier.js";
 import { CommandVerifier } from "./command-verifier.js";
 import { TrajectoryVerifier } from "./trajectory-verifier.js";
+import { ASTVerifier } from "./ast-verifier.js";
 import { CommandExecutor } from "../sandbox/executor.js";
 import { WorkspaceManager } from "../sandbox/workspace.js";
 
@@ -10,6 +11,7 @@ export class ScenarioVerifier {
   private fileVerifier: FileVerifier;
   private commandVerifier: CommandVerifier;
   private trajectoryVerifier: TrajectoryVerifier;
+  private astVerifier: ASTVerifier;
 
   constructor(scenarioOrExecutor: ScenarioDefinition | CommandExecutor, workspace: WorkspaceManager, executor?: CommandExecutor) {
     let actualExecutor: CommandExecutor;
@@ -23,6 +25,7 @@ export class ScenarioVerifier {
     this.fileVerifier = new FileVerifier(workspace);
     this.commandVerifier = new CommandVerifier(actualExecutor, workspace.getWorkspacePath());
     this.trajectoryVerifier = new TrajectoryVerifier();
+    this.astVerifier = new ASTVerifier(workspace);
   }
 
   public async verify(scenarioOrTrajectory: ScenarioDefinition | Trajectory, maybeTrajectory?: Trajectory): Promise<HarnessReport> {
@@ -59,6 +62,12 @@ export class ScenarioVerifier {
     if (scenario.assertions?.trajectory && scenario.assertions.trajectory.length > 0) {
       const trajResults = this.trajectoryVerifier.verify(scenario.assertions.trajectory, trajectory);
       assertionResults.push(...trajResults);
+    }
+
+    // 4. Verify AST semantic assertions
+    if (scenario.assertions?.ast && scenario.assertions.ast.length > 0) {
+      const astResults = await this.astVerifier.verify(scenario.assertions.ast);
+      assertionResults.push(...astResults);
     }
 
     const passedAssertions = assertionResults.filter((r) => r.passed).length;

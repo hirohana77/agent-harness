@@ -109,6 +109,23 @@ program
             {
               rule: "no_security_violations"
             }
+          ],
+          ast: [
+            {
+              path: "src/calc.js",
+              rules: [
+                {
+                  rule: "has_function",
+                  name: "add",
+                  minParams: 2,
+                  maxParams: 2
+                },
+                {
+                  rule: "no_forbidden_syntax",
+                  forbidden: ["eval", "debugger"]
+                }
+              ]
+            }
           ]
         }
       };

@@ -60,13 +60,36 @@ export class ASTVerifier {
       ];
     }
 
-    const sourceFile = ASTParser.parse(assertion.path, code);
-    const analyzer = new ASTAnalyzer(sourceFile);
-    const results: AssertionItemResult[] = [];
+    let sourceFile;
+    let analyzer: ASTAnalyzer;
+    try {
+      sourceFile = ASTParser.parse(assertion.path, code);
+      analyzer = new ASTAnalyzer(sourceFile);
+    } catch (err: any) {
+      return [
+        {
+          type: 'ast',
+          target: `${assertion.path} [parse]`,
+          passed: false,
+          message: `Failed to parse AST for "${assertion.path}": ${err.message}`,
+        },
+      ];
+    }
 
+    const results: AssertionItemResult[] = [];
     for (const rule of assertion.rules) {
-      const result = this.evaluateRule(assertion.path, rule, analyzer);
-      results.push(result);
+      try {
+        const result = this.evaluateRule(assertion.path, rule, analyzer);
+        results.push(result);
+      } catch (err: any) {
+        results.push({
+          type: 'ast',
+          target: `${assertion.path} [${rule.rule}]`,
+          passed: false,
+          message: `Internal error evaluating AST rule ${rule.rule}: ${err.message}`,
+          details: { error: String(err) },
+        });
+      }
     }
 
     return results;
