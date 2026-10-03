@@ -84,3 +84,7 @@ export class ScenarioVerifier {
     };
   }
 }
+
+export * from './ast-verifier.js';
+export * from './ast/parser.js';
+export * from './ast/analyzer.js';

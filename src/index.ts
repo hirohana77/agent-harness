@@ -35,3 +35,6 @@ export * from './events/observers/index.js';
 export * from './benchmark/swebench/index.js';
 export * from './verifier/ast/types.js';
 export * from './verifier/ast/schemas.js';
+export * from './verifier/ast-verifier.js';
+export * from './verifier/ast/parser.js';
+export * from './verifier/ast/analyzer.js';
