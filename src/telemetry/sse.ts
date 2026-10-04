@@ -12,6 +12,7 @@ interface SSEClientInternal {
   connectedAt: Date;
   filterTypes?: string[];
   lastEventId?: string;
+  isClosed: boolean;
 }
 
 export class SSEManager {
@@ -69,17 +70,26 @@ export class SSEManager {
       connectedAt: new Date(),
       filterTypes,
       lastEventId,
+      isClosed: false,
     };
 
     this.clients.set(clientId, client);
 
-    req.on('close', () => {
-      this.removeClient(clientId);
-    });
+    const cleanup = () => {
+      if (!client.isClosed) {
+        client.isClosed = true;
+        this.removeClient(clientId);
+      }
+    };
+
+    req.on('close', cleanup);
+    req.on('error', cleanup);
+    res.on('close', cleanup);
+    res.on('error', cleanup);
 
     // Send initial handshake
     this.writeDirect(
-      res,
+      client,
       `event: connected\ndata: ${JSON.stringify({
         clientId,
         timestamp: new Date().toISOString(),
@@ -103,17 +113,43 @@ export class SSEManager {
   public broadcast(event: TrajectoryEvent): void {
     if (this.clients.size === 0) return;
 
-    for (const client of this.clients.values()) {
-      if (this.shouldSendEvent(event, client.filterTypes)) {
-        this.sendEventToClient(client, event);
+    const deadClients: string[] = [];
+
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.isClosed) {
+        deadClients.push(clientId);
+        continue;
       }
+      if (this.shouldSendEvent(event, client.filterTypes)) {
+        const sent = this.sendEventToClient(client, event);
+        if (!sent) {
+          deadClients.push(clientId);
+        }
+      }
+    }
+
+    for (const id of deadClients) {
+      this.removeClient(id);
     }
   }
 
   public sendHeartbeat(): void {
     if (this.clients.size === 0) return;
-    for (const client of this.clients.values()) {
-      this.writeDirect(client.res, `: keepalive\n\n`);
+
+    const deadClients: string[] = [];
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.isClosed) {
+        deadClients.push(clientId);
+        continue;
+      }
+      const sent = this.writeDirect(client, `: keepalive\n\n`);
+      if (!sent) {
+        deadClients.push(clientId);
+      }
+    }
+
+    for (const id of deadClients) {
+      this.removeClient(id);
     }
   }
 
@@ -138,6 +174,7 @@ export class SSEManager {
     }
 
     for (const client of this.clients.values()) {
+      client.isClosed = true;
       try {
         client.res.end();
       } catch {
@@ -175,22 +212,23 @@ export class SSEManager {
     return false;
   }
 
-  private sendEventToClient(client: SSEClientInternal, event: TrajectoryEvent): void {
+  private sendEventToClient(client: SSEClientInternal, event: TrajectoryEvent): boolean {
     const payload = `id: ${event.id}\nevent: message\ndata: ${JSON.stringify(event)}\n\n`;
-    const success = this.writeDirect(client.res, payload);
+    const success = this.writeDirect(client, payload);
     if (success) {
       client.lastEventId = event.id;
     }
+    return success;
   }
 
-  private writeDirect(res: ServerResponse, payload: string): boolean {
+  private writeDirect(client: SSEClientInternal, payload: string): boolean {
     try {
-      if (!res.writableEnded) {
-        res.write(payload);
+      if (!client.isClosed && !client.res.writableEnded) {
+        client.res.write(payload);
         return true;
       }
     } catch {
-      // Stream error / disconnected client
+      client.isClosed = true;
     }
     return false;
   }

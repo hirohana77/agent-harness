@@ -60,6 +60,12 @@ export class TelemetryServer {
         reject(err);
       });
 
+      srv.on('clientError', (_err, socket) => {
+        if (!socket.destroyed) {
+          socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+        }
+      });
+
       srv.listen(this.config.port, this.config.host, () => {
         const addr = srv.address();
         if (addr && typeof addr === 'object') {
@@ -90,6 +96,11 @@ export class TelemetryServer {
 
     this.status = 'stopping';
     this.sseManager.closeAll();
+
+    // Node 18.2+ allows closing idle or all connections for immediate shutdown
+    if (typeof (this.server as any).closeIdleConnections === 'function') {
+      (this.server as any).closeIdleConnections();
+    }
 
     return new Promise<void>((resolve, reject) => {
       this.server!.close((err) => {

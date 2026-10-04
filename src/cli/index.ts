@@ -14,6 +14,8 @@ import { MarkdownReporter } from "../reporters/markdown.js";
 import { LiveConsoleObserver } from "../events/observers/console.js";
 import { JsonLinesStreamObserver } from "../events/observers/jsonl.js";
 import { TrajectoryStreamObserver } from "../events/types.js";
+import { TelemetryServer } from "../telemetry/server.js";
+import { TelemetryObserver } from "../telemetry/observer.js";
 
 const program = new Command();
 
@@ -189,7 +191,13 @@ program
   .option("--report-json <path>", "Save report to JSON file")
   .option("--report-md <path>", "Save report to Markdown file")
   .option("--save-trajectory <path>", "Save generated trajectory to file")
+  .option("--telemetry", "Start real-time web telemetry server & dashboard during execution")
+  .option("--telemetry-port <port>", "Port for telemetry server (default: 3456)", (v) => parseInt(v, 10), 3456)
+  .option("--telemetry-host <host>", "Host for telemetry server (default: 127.0.0.1)", "127.0.0.1")
+  .option("--telemetry-remote <url>", "Forward execution events to remote telemetry server URL")
+  .option("--keep-alive", "Keep telemetry dashboard server active after run completes until interrupted")
   .action(async (options) => {
+    let telemetryServer: TelemetryServer | undefined;
     try {
       const scenario = await loadScenario(options.scenario);
       if (options.sandbox || options.image || options.containerNetwork) {
@@ -210,6 +218,19 @@ program
       }
       if (options.streamJsonl) {
         observers.push(new JsonLinesStreamObserver(options.streamJsonl));
+      }
+
+      if (options.telemetry) {
+        telemetryServer = new TelemetryServer({
+          port: options.telemetryPort,
+          host: options.telemetryHost,
+        });
+        const { url } = await telemetryServer.start();
+        console.log(chalk.cyan(`📡 Live Telemetry Dashboard running at: ${chalk.bold.underline(`${url}/dashboard`)}`));
+        observers.push(new TelemetryObserver({ server: telemetryServer }));
+      } else if (options.telemetryRemote) {
+        console.log(chalk.cyan(`📡 Forwarding telemetry to remote server: ${options.telemetryRemote}`));
+        observers.push(new TelemetryObserver({ url: options.telemetryRemote }));
       }
 
       const { report, trajectory } = await AgentHarness.runScenario(
@@ -261,16 +282,76 @@ program
         console.log(chalk.gray(`Markdown report saved to: ${options.reportMd}`));
       }
 
+      if (telemetryServer) {
+        telemetryServer.setLatestReport(report);
+        telemetryServer.setLatestTrajectory(trajectory);
+      }
+
+      if (telemetryServer && options.keepAlive) {
+        console.log(chalk.yellow(`\nTelemetry server kept alive at http://${options.telemetryHost}:${options.telemetryPort}/dashboard. Press Ctrl+C to stop.\n`));
+        await new Promise<void>((resolve) => {
+          process.on("SIGINT", () => {
+            telemetryServer?.stop().then(resolve);
+          });
+          process.on("SIGTERM", () => {
+            telemetryServer?.stop().then(resolve);
+          });
+        });
+      } else if (telemetryServer) {
+        await telemetryServer.stop();
+      }
+
       if (!report.passed) {
         process.exit(1);
       }
     } catch (err: any) {
+      if (telemetryServer) {
+        await telemetryServer.stop().catch(() => {});
+      }
       console.error(chalk.red("✘ Scenario run failed:"), err.message);
       process.exit(1);
     }
   });
 
-// 5. swebench commands
+// 5. serve command (real-time telemetry and SSE dashboard server)
+program
+  .command("serve")
+  .description("Start the real-time web telemetry and SSE dashboard server")
+  .option("-p, --port <port>", "Port to listen on", (v) => parseInt(v, 10), 3456)
+  .option("-H, --host <host>", "Host address to listen on", "127.0.0.1")
+  .option("--history-limit <limit>", "Maximum number of buffered events in memory", (v) => parseInt(v, 10), 1000)
+  .option("--auth <key>", "Optional authorization bearer token")
+  .action(async (options) => {
+    try {
+      const server = new TelemetryServer({
+        port: options.port,
+        host: options.host,
+        historyLimit: options.historyLimit,
+        authKey: options.auth,
+      });
+
+      const { url } = await server.start();
+      console.log(chalk.bold.green(`✔ Agent Harness Live Telemetry Server running:`));
+      console.log(`  ${chalk.gray("Dashboard UI:")}  ${chalk.cyan.underline(`${url}/dashboard`)}`);
+      console.log(`  ${chalk.gray("SSE Stream:")}    ${chalk.cyan.underline(`${url}/api/events`)}`);
+      console.log(`  ${chalk.gray("Server Status:")} ${chalk.cyan.underline(`${url}/api/status`)}`);
+      console.log(chalk.gray(`\nWaiting for agent harness events. Press Ctrl+C to stop.\n`));
+
+      const shutdown = async () => {
+        console.log(chalk.yellow(`\nShutting down telemetry server...\n`));
+        await server.stop();
+        process.exit(0);
+      };
+
+      process.on("SIGINT", shutdown);
+      process.on("SIGTERM", shutdown);
+    } catch (err: any) {
+      console.error(chalk.red("✘ Failed to start telemetry server:"), err.message);
+      process.exit(1);
+    }
+  });
+
+// 6. swebench commands
 const swebenchCmd = program
   .command("swebench")
   .description("SWE-bench dataset adapter, execution, and evaluation utilities");
