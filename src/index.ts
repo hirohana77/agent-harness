@@ -38,3 +38,4 @@ export * from './verifier/ast/schemas.js';
 export * from './verifier/ast-verifier.js';
 export * from './verifier/ast/parser.js';
 export * from './verifier/ast/analyzer.js';
+export * from './telemetry/index.js';
