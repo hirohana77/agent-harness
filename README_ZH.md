@@ -220,6 +220,63 @@ agent-harness run \
 - 内置 `ContainerProcessRegistry` 监听进程退出与中断信号（`SIGINT` / `SIGTERM`），确保评测无论成功、失败或异常中断均 100% 自动清理无僵尸容器；
 - 支持智能探测 Docker / Podman 守护进程状态与动态回退。
 
+---
+
+## 实时 Web 遥测与 SSE 监控面板 (Live Dashboard)
+
+`agent-harness` 内置零外部依赖的 HTTP 与 Server-Sent Events (SSE) 实时遥测服务端，并附带开箱即用的现代化 Web 监控面板：
+
+### 1. 启动独立遥测监控服务端
+```bash
+agent-harness serve --port 3456
+```
+浏览器访问 `http://127.0.0.1:3456/dashboard` 即可查看可视化面板。
+
+### 2. 评测执行时同步开启实时大屏
+```bash
+agent-harness run \
+  --scenario ./scenario.yaml \
+  --command "node agent.js" \
+  --telemetry \
+  --telemetry-port 3456 \
+  --keep-alive
+```
+
+### 核心特性
+- **现代化内嵌 Web 面板**：黑曜石暗色风格大屏，实时呈现执行轮次、Token 消耗、工具调用频次、执行耗时、AST 语义断言检查清单以及可折叠展开的原始事件 JSON 明细；
+- **Server-Sent Events (SSE) 流式传输**：开放 `/api/events` 实时事件流，内置心跳保活（`: keepalive`），防止网络代理与反向代理连接超时；
+- **断线重连回放机制**：支持标准 `Last-Event-ID` 请求头与 `?lastEventId=` 查询参数，依托高性能内存环形缓冲区（`EventRingBuffer`）自动回放网络抖动期间遗漏的事件；
+- **多粒度主题过滤**：支持 `?types=tool:*,turn:*` 通配符过滤订阅；
+- **标准化 REST 接口**：
+  - `GET /api/status`：获取当前评测状态、在线客户端数、服务器运行时间与缓冲区指标；
+  - `GET /api/history`：按条件分页/按类型检索事件历史流水；
+  - `GET /api/report`：获取最新 HarnessReport 评测断言报告；
+  - `GET /api/trajectory`：获取完整智能体执行轨迹；
+  - `POST /api/events`：支持分布式集群、多进程或远程 Agent 上报遥测事件。
+
+### TypeScript SDK 接入示例
+```typescript
+import { TelemetryServer, TelemetryObserver, AgentHarness } from 'agent-harness';
+
+// 启动遥测服务端
+const server = new TelemetryServer({ port: 3456, host: '127.0.0.1' });
+const { url } = await server.start();
+console.log(`实时监控大屏已就绪: ${url}/dashboard`);
+
+// 挂载遥测观察者至执行流水线
+const observer = new TelemetryObserver({ server });
+
+const { report } = await AgentHarness.runScenario(
+  scenario,
+  async (ctx) => {
+    // 执行过程中的所有 turn、tool 调用与沙箱状态将实时推送至 Web 仪表盘
+  },
+  { observers: [observer] }
+);
+
+server.setLatestReport(report);
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。

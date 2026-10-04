@@ -20,6 +20,7 @@
 - **Deterministic Trajectories**: Captures step-by-step agent turns, tool calls, token usage, latency, and costs.
 - **Real-Time Streaming Event Bus**: Zero-overhead pub/sub architecture supporting wildcard subscriptions (`tool:*`, `*`), live observers, and async event dispatching.
 - **Streaming Telemetry Observers**: Built-in `LiveConsoleObserver` for real-time terminal feedback, `JsonLinesStreamObserver` for streaming NDJSON persistence, and `BufferedStreamObserver` for replay.
+- **Live Web Dashboard & SSE Telemetry**: Embedded, zero-dependency real-time browser dashboard and HTTP/SSE streaming server. Live execution timeline, tool call inspection, KPI counters, ring buffer replay via `Last-Event-ID`, and RESTful status endpoints.
 - **Offline Trajectory Replay**: Re-executes recorded trajectories against workspaces without consuming LLM API tokens.
 - **AST Semantic Code Verification**: Compiler-level TypeScript/JavaScript structural analysis. Assert functions, class hierarchies, interfaces, type aliases, module imports/exports, anti-patterns (`eval`, `debugger`, `console`, `any`, `var`, empty catch, nested ternaries), and cyclomatic complexity limits without regex brittleness.
 - **Multi-faceted Verification**: Asserts file system state, AST semantic rules, test suite exit codes, and agent behavioral constraints.
@@ -288,6 +289,62 @@ const results = await astVerifier.verify([
 ```
 
 ---
+
+## Real-Time Web Telemetry & Live Dashboard (SSE)
+
+`agent-harness` features an embedded, zero-dependency HTTP and Server-Sent Events (SSE) telemetry server with an interactive web dashboard. Monitor autonomous agent executions live in your browser with zero setup overhead:
+
+### 1. Launch Standalone Telemetry Server
+```bash
+agent-harness serve --port 3456
+```
+Open `http://127.0.0.1:3456/dashboard` in your browser.
+
+### 2. Live Run with Automatic Dashboard
+Run a scenario while streaming events directly to the embedded web dashboard:
+```bash
+agent-harness run \
+  --scenario ./scenario.yaml \
+  --command "node agent.js" \
+  --telemetry \
+  --telemetry-port 3456 \
+  --keep-alive
+```
+
+### Key Capabilities
+- **Embedded Web UI**: Dark mode dashboard displaying execution turns, token counters, tool invocations, duration, and expandable JSON event payloads.
+- **Server-Sent Events (SSE)**: Connect to `/api/events` with automatic heartbeat pings (`: keepalive`) to prevent proxy timeouts.
+- **Reconnection Recovery**: Automatic miss-event replay using `Last-Event-ID` header or `?lastEventId=` query parameter backed by an in-memory `EventRingBuffer`.
+- **Event Filtering**: Subscribe to granular event topics such as `?types=tool:*,turn:*` or filter directly in the UI.
+- **REST Endpoints**:
+  - `GET /api/status`: Active scenario, connected client count, uptime, and memory buffer usage.
+  - `GET /api/history`: Chronological event log with `limit`, `type`, and `scenarioId` filters.
+  - `GET /api/report`: Latest verification report and assertion pass/fail breakdown.
+  - `GET /api/trajectory`: Full step-by-step agent trajectory.
+  - `POST /api/events`: Ingest events from distributed test runners or remote agents.
+
+### Programmatic SDK Usage
+```typescript
+import { TelemetryServer, TelemetryObserver, AgentHarness } from 'agent-harness';
+
+// Start server
+const telemetryServer = new TelemetryServer({ port: 3456, host: '127.0.0.1' });
+const { url } = await telemetryServer.start();
+console.log(`Telemetry dashboard ready at: ${url}/dashboard`);
+
+// Attach observer to agent scenario execution
+const observer = new TelemetryObserver({ server: telemetryServer });
+
+const { report } = await AgentHarness.runScenario(
+  scenario,
+  async (ctx) => {
+    // Agent execution steps automatically stream to dashboard
+  },
+  { observers: [observer] }
+);
+
+telemetryServer.setLatestReport(report);
+```
 
 ## Architecture Specification
 
