@@ -72,7 +72,7 @@ export class ScenarioVerifier {
 
     const passedAssertions = assertionResults.filter((r) => r.passed).length;
     const failedAssertions = assertionResults.filter((r) => !r.passed).length;
-    const allPassed = failedAssertions === 0 && trajectory.status !== "error" && trajectory.status !== "security_violation";
+    const allPassed = failedAssertions === 0 && trajectory.status !== "error" && trajectory.status !== "security_violation" && trajectory.status !== "aborted";
 
     return {
       scenarioId: scenario.id,

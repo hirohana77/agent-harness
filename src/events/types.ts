@@ -168,6 +168,13 @@ export interface TrajectoryStreamObserver {
 }
 
 export interface HarnessRunOptions {
-  eventBus?: any; // TrajectoryEventBus
+  eventBus?: any;
   observers?: TrajectoryStreamObserver[];
+  steering?: any;
+}
+
+export interface HarnessRunOptions {
+  eventBus?: any;
+  observers?: TrajectoryStreamObserver[];
+  steering?: any;
 }
