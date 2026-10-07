@@ -3,6 +3,7 @@ import { CommandExecutor } from "../sandbox/executor.js";
 import { WorkspaceManager } from "../sandbox/workspace.js";
 import { TrajectoryRecorder } from "../trajectory/recorder.js";
 import { MockToolRegistry } from "./registry.js";
+import { SteeringController } from "../steering/controller.js";
 
 export type NativeToolHandler = (
   args: Record<string, unknown>,
@@ -15,18 +16,30 @@ export class VirtualToolDispatcher {
   private workspace: WorkspaceManager;
   private recorder?: TrajectoryRecorder;
   private nativeTools: Map<string, NativeToolHandler> = new Map();
+  private steering?: SteeringController;
 
   constructor(
     mockRegistry: MockToolRegistry,
     executor: CommandExecutor,
     workspace: WorkspaceManager,
-    recorder?: TrajectoryRecorder
+    recorder?: TrajectoryRecorder,
+    steering?: SteeringController
   ) {
     this.mockRegistry = mockRegistry;
     this.executor = executor;
     this.workspace = workspace;
     this.recorder = recorder;
+    this.steering = steering;
     this.registerBuiltinTools();
+  }
+
+  public setSteeringController(steering: SteeringController): this {
+    this.steering = steering;
+    return this;
+  }
+
+  public getSteeringController(): SteeringController | undefined {
+    return this.steering;
   }
 
   private registerBuiltinTools(): void {
@@ -70,6 +83,30 @@ export class VirtualToolDispatcher {
     const callId = this.recorder?.notifyToolStart(toolName, args);
     let result: ToolCallResult;
 
+    // Steering interceptor hook
+    if (this.steering) {
+      const decision = await this.steering.interceptTool(toolName, args);
+      if (!decision.shouldExecuteNative) {
+        result =
+          decision.overrideResult ||
+          decision.skipResult || {
+            success: true,
+            output: `Tool "${toolName}" handled by steering`,
+            exitCode: 0,
+          };
+        const durationMs = Date.now() - startTime;
+        if (this.recorder) {
+          this.recorder.recordToolCall(toolName, args, result, durationMs, callId);
+        }
+        if (result.success) {
+          this.steering.recordSuccess();
+        } else {
+          this.steering.recordError();
+        }
+        return result;
+      }
+    }
+
     // Route 1: Mock registry (if registered or mocked)
     if (this.mockRegistry.hasTool(toolName)) {
       result = await this.mockRegistry.dispatch(toolName, args);
@@ -95,6 +132,14 @@ export class VirtualToolDispatcher {
     const durationMs = Date.now() - startTime;
     if (this.recorder) {
       this.recorder.recordToolCall(toolName, args, result, durationMs, callId);
+    }
+
+    if (this.steering) {
+      if (result.success) {
+        this.steering.recordSuccess();
+      } else {
+        this.steering.recordError();
+      }
     }
 
     return result;

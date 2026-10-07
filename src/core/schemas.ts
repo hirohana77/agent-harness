@@ -161,6 +161,7 @@ export const TrajectorySchema = z.object({
     'timeout',
     'budget_exceeded',
     'security_violation',
+    'aborted',
     'error',
   ]).default('idle'),
   turns: z.array(AgentTurnSchema).default([]),

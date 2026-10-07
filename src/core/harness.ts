@@ -12,6 +12,7 @@ import { MockToolRegistry } from "../mock/registry.js";
 import { VirtualToolDispatcher } from "../mock/dispatcher.js";
 import { TrajectoryEventBus } from "../events/bus.js";
 import { HarnessRunOptions } from "../events/types.js";
+import { SteeringController } from "../steering/controller.js";
 
 export interface AgentExecutionContext {
   scenario: ScenarioDefinition;
@@ -23,6 +24,7 @@ export interface AgentExecutionContext {
   tools: VirtualToolDispatcher;
   mockRegistry: MockToolRegistry;
   eventBus: TrajectoryEventBus;
+  steering?: SteeringController;
 }
 
 export class AgentHarness {
@@ -78,7 +80,15 @@ export class AgentHarness {
     const executor = new CommandExecutor(security, workspacePath, 1024 * 1024, backend);
     const recorder = new TrajectoryRecorder(scenario.id, scenario.budgets, eventBus);
     const mockRegistry = new MockToolRegistry();
-    const tools = new VirtualToolDispatcher(mockRegistry, executor, workspace, recorder);
+
+    const steering: SteeringController | undefined = options?.steering;
+    if (steering) {
+      steering.setEventBus(eventBus);
+      steering.setScenarioId(scenario.id);
+      steering.start();
+    }
+
+    const tools = new VirtualToolDispatcher(mockRegistry, executor, workspace, recorder, steering);
 
     try {
       try {
@@ -92,6 +102,7 @@ export class AgentHarness {
           tools,
           mockRegistry,
           eventBus,
+          steering,
         });
 
         recorder.finalize("completed");
@@ -111,6 +122,8 @@ export class AgentHarness {
           recorder.finalize("security_violation");
         } else if (err.name === "BudgetExceededError") {
           recorder.finalize("budget_exceeded");
+        } else if (err.name === "SteeringAbortError") {
+          recorder.finalize("aborted");
         } else {
           recorder.finalize("error");
         }
