@@ -39,3 +39,5 @@ export * from './verifier/ast-verifier.js';
 export * from './verifier/ast/parser.js';
 export * from './verifier/ast/analyzer.js';
 export * from './telemetry/index.js';
+export * from './steering/types.js';
+export * from './steering/schemas.js';

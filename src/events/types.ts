@@ -1,4 +1,5 @@
 import { ToolCallResult, TrajectoryStatus, HarnessReport } from '../core/types.js';
+import { BreakpointHitInfo, InterventionAction } from '../steering/types.js';
 
 export type TrajectoryEventType =
   | 'scenario:start'
@@ -12,6 +13,9 @@ export type TrajectoryEventType =
   | 'error'
   | 'sandbox:ready'
   | 'sandbox:teardown'
+  | 'breakpoint:hit'
+  | 'breakpoint:resume'
+  | 'steering:action'
   | 'custom';
 
 export interface BaseTrajectoryEvent {
@@ -96,7 +100,6 @@ export interface ErrorEvent extends BaseTrajectoryEvent {
   stack?: string;
 }
 
-
 export interface SandboxReadyEvent extends BaseTrajectoryEvent {
   type: 'sandbox:ready';
   backend: 'local' | 'docker' | 'podman';
@@ -109,6 +112,21 @@ export interface SandboxTeardownEvent extends BaseTrajectoryEvent {
   backend: 'local' | 'docker' | 'podman';
   containerId?: string;
   durationMs?: number;
+}
+
+export interface BreakpointHitEvent extends BaseTrajectoryEvent {
+  type: 'breakpoint:hit';
+  hit: BreakpointHitInfo;
+}
+
+export interface BreakpointResumeEvent extends BaseTrajectoryEvent {
+  type: 'breakpoint:resume';
+  action: InterventionAction;
+}
+
+export interface SteeringActionEvent extends BaseTrajectoryEvent {
+  type: 'steering:action';
+  action: InterventionAction;
 }
 
 export interface CustomEvent extends BaseTrajectoryEvent {
@@ -129,6 +147,9 @@ export type TrajectoryEvent =
   | ErrorEvent
   | SandboxReadyEvent
   | SandboxTeardownEvent
+  | BreakpointHitEvent
+  | BreakpointResumeEvent
+  | SteeringActionEvent
   | CustomEvent;
 
 export type EventPattern = TrajectoryEventType | `${string}:*` | '*';
