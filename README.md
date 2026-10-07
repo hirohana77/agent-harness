@@ -20,6 +20,7 @@
 - **Deterministic Trajectories**: Captures step-by-step agent turns, tool calls, token usage, latency, and costs.
 - **Real-Time Streaming Event Bus**: Zero-overhead pub/sub architecture supporting wildcard subscriptions (`tool:*`, `*`), live observers, and async event dispatching.
 - **Streaming Telemetry Observers**: Built-in `LiveConsoleObserver` for real-time terminal feedback, `JsonLinesStreamObserver` for streaming NDJSON persistence, and `BufferedStreamObserver` for replay.
+- **Interactive Steering & Breakpoint Debugger (HITL)**: Dynamic conditional breakpoints (`tool` regex, `error_count`, `turn`, `budget_ratio`). Suspend execution asynchronously, inject corrective guidance prompts, override tool returns, skip calls, or safely abort runs via Live Web Dashboard, CLI, or RESTful control APIs.
 - **Live Web Dashboard & SSE Telemetry**: Embedded, zero-dependency real-time browser dashboard and HTTP/SSE streaming server. Live execution timeline, tool call inspection, KPI counters, ring buffer replay via `Last-Event-ID`, and RESTful status endpoints.
 - **Offline Trajectory Replay**: Re-executes recorded trajectories against workspaces without consuming LLM API tokens.
 - **AST Semantic Code Verification**: Compiler-level TypeScript/JavaScript structural analysis. Assert functions, class hierarchies, interfaces, type aliases, module imports/exports, anti-patterns (`eval`, `debugger`, `console`, `any`, `var`, empty catch, nested ternaries), and cyclomatic complexity limits without regex brittleness.
@@ -344,6 +345,77 @@ const { report } = await AgentHarness.runScenario(
 );
 
 telemetryServer.setLatestReport(report);
+```
+
+## Interactive Steering & Breakpoint Debugger (Human-in-the-Loop)
+
+Agent evaluations often encounter loops, hallucinated commands, or safety risks. The **Interactive Steering & Breakpoint Engine** introduces full debugging and intervention capabilities without breaking deterministic harnesses.
+
+### 1. Conditional Breakpoint Rules
+Breakpoints can be added statically or dynamically at runtime:
+- **`tool`**: Matches tool name by exact string or RegExp (e.g. `^exec_.*`, `bash`), with optional argument matching.
+- **`error_count`**: Suspends when consecutive tool errors reach a threshold (e.g. `error: 3`).
+- **`turn`**: Suspends when execution exceeds a turn count (e.g. `turn: 5`).
+- **`budget_ratio`**: Triggers when token or turn consumption passes a watermark (e.g. `0.85`).
+- **`custom`**: Evaluates custom async predicate functions against execution context.
+
+### 2. Runtime Intervention Actions
+When execution hits a breakpoint or is manually paused:
+- `continue`: Resumes normal execution.
+- `inject_prompt`: Injects corrective feedback/guidance into the agent prompt queue.
+- `override_tool`: Intercepts tool invocation and replaces its output with a custom mock result without invoking sandbox binaries.
+- `skip_tool`: Skips tool execution with an optional fallback response.
+- `abort`: Terminates execution immediately and marks trajectory status as `aborted`.
+
+### 3. RESTful Control Endpoints
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/control/state` | Retrieve current pause status, active breakpoint hit, and history |
+| `POST` | `/api/control/pause` | Pause running execution manually |
+| `POST` | `/api/control/resume` | Resume execution with optional single-step action |
+| `POST` | `/api/control/intervene` | Submit intervention action (`inject_prompt`, `override_tool`, `skip_tool`, `abort`) |
+| `POST` | `/api/control/breakpoint` | Dynamically register a new breakpoint rule |
+| `DELETE` | `/api/control/breakpoint?id=<id>` | Remove an existing breakpoint rule |
+
+### 4. CLI & SDK Usage
+
+Run with interactive steering and breakpoints:
+```bash
+# Start scenario with live dashboard and tool breakpoint
+agent-harness run -s ./scenario.yaml --telemetry -i --breakpoint tool:bash --breakpoint error:3
+```
+
+Programmatic TypeScript SDK:
+```typescript
+import { AgentHarness, SteeringController, TelemetryServer } from 'agent-harness';
+
+const steering = new SteeringController();
+
+// Add breakpoint for destructive operations
+steering.addBreakpoint({
+  id: 'bp_bash_guard',
+  type: 'tool',
+  toolPattern: 'bash',
+});
+
+const server = new TelemetryServer({ port: 3456, steering });
+await server.start();
+
+const { report, trajectory } = await AgentHarness.runScenario(
+  scenario,
+  async (ctx) => {
+    // Injected prompts can be consumed in the agent loop
+    const guidePrompts = ctx.steering?.consumeInjectedPrompts();
+    if (guidePrompts && guidePrompts.length > 0) {
+      console.log('Received human guidance:', guidePrompts);
+    }
+
+    // Agent executes tools; breakpoint triggers automatically
+    await ctx.tools.call('bash', { command: 'echo hello' });
+  },
+  { steering }
+);
 ```
 
 ## Architecture Specification

@@ -277,6 +277,76 @@ const { report } = await AgentHarness.runScenario(
 server.setLatestReport(report);
 ```
 
+## 交互式转向与断点调试器 (Human-in-the-Loop)
+
+在自主智能体执行复杂工程任务与长链路评测时，往往会出现幻觉、陷入死循环或执行危险操作。**Interactive Steering & Breakpoint Engine** 为评估流水线赋予了类似调试器（Debugger）的实时干预与动态调试能力。
+
+### 1. 条件断点规则 (Breakpoint Rules)
+支持在启动时配置或运行时动态注册以下断点规则：
+- **`tool`**：按工具名完全匹配或正则匹配（如 `^exec_.*`、`bash`），支持入参字段过滤匹配。
+- **`error_count`**：连续工具报错达到指定阈值时自动触发挂起（如连续报错 3 次）。
+- **`turn`**：智能体执行轮次达到设定上限时触发断点。
+- **`budget_ratio`**：Token 或轮次预算消耗达到安全警戒线（如 `>= 0.85`）时触发挂起。
+- **`custom`**：传入自定义异步谓词函数，按任意运行时上下文动态判断。
+
+### 2. 运行时干预动作 (Intervention Actions)
+智能体命中断点或被手动挂起后，支持下达以下干预指令：
+- `continue`：单步放行或继续执行；
+- `inject_prompt`：向 Agent 注入外部反馈/纠偏指令，在 Agent 上下文中消费（`ctx.steering.consumeInjectedPrompts()`）；
+- `override_tool`：拦截目标工具调用，替换其返回结果（Mock override），跳过沙箱原生进程执行；
+- `skip_tool`：直接跳过目标工具执行并返回成功；
+- `abort`：安全终止执行，将轨迹状态标记为 `aborted` 并生成断言报告。
+
+### 3. RESTful 控制接口清单
+
+| 请求方式 | 路由端点 | 功能说明 |
+| :--- | :--- | :--- |
+| `GET` | `/api/control/state` | 获取当前挂起状态、命中断点详情、断点规则列表与干预历史 |
+| `POST` | `/api/control/pause` | 手动挂起正在执行的智能体场景 |
+| `POST` | `/api/control/resume` | 恢复智能体执行 |
+| `POST` | `/api/control/intervene` | 提交干预操作（`inject_prompt`, `override_tool`, `skip_tool`, `abort`） |
+| `POST` | `/api/control/breakpoint` | 动态添加新断点规则 |
+| `DELETE` | `/api/control/breakpoint?id=<id>` | 移除指定断点规则 |
+
+### 4. CLI 命令行与 SDK 使用
+
+在 CLI 评测中启用交互式断点与实时 Web 监控：
+```bash
+agent-harness run -s ./scenario.yaml --telemetry -i --breakpoint tool:bash --breakpoint error:3
+```
+
+TypeScript SDK 编程式调用：
+```typescript
+import { AgentHarness, SteeringController, TelemetryServer } from 'agent-harness';
+
+const steering = new SteeringController();
+
+// 注册高危命令断点
+steering.addBreakpoint({
+  id: 'bp_bash_guard',
+  type: 'tool',
+  toolPattern: 'bash',
+});
+
+// 挂载至遥测服务端
+const server = new TelemetryServer({ port: 3456, steering });
+await server.start();
+
+const { report, trajectory } = await AgentHarness.runScenario(
+  scenario,
+  async (ctx) => {
+    // 轮次中消费外部人类专家注入的提示词
+    const prompts = ctx.steering?.consumeInjectedPrompts();
+    if (prompts && prompts.length > 0) {
+      console.log('收到人类指导提示词:', prompts);
+    }
+
+    await ctx.tools.call('bash', { command: 'echo hello' });
+  },
+  { steering }
+);
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。
