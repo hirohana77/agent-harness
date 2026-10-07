@@ -13,12 +13,15 @@ import {
 import { EventRingBuffer } from './ring-buffer.js';
 import { SSEManager } from './sse.js';
 import { renderDashboardHtml } from './dashboard.js';
+import { SteeringController } from '../steering/controller.js';
+import { InterventionActionSchema, AddBreakpointRequestSchema } from '../steering/schemas.js';
 
 export class TelemetryServer {
   private config: TelemetryServerConfig;
   private server?: Server;
   private buffer: EventRingBuffer;
   private sseManager: SSEManager;
+  private steering?: SteeringController;
   private startedAt?: Date;
   private status: 'running' | 'stopping' | 'stopped' = 'stopped';
   private totalEventsReceived = 0;
@@ -34,10 +37,22 @@ export class TelemetryServer {
   private boundPort = 0;
   private boundHost = '127.0.0.1';
 
-  constructor(options?: Partial<TelemetryServerConfig>) {
+  constructor(options?: Partial<TelemetryServerConfig> & { steering?: SteeringController }) {
     this.config = TelemetryServerConfigSchema.parse(options || {});
     this.buffer = new EventRingBuffer(this.config.historyLimit);
     this.sseManager = new SSEManager(this.config.heartbeatIntervalMs);
+    if (options?.steering) {
+      this.steering = options.steering;
+    }
+  }
+
+  public setSteeringController(steering: SteeringController): this {
+    this.steering = steering;
+    return this;
+  }
+
+  public getSteeringController(): SteeringController | undefined {
+    return this.steering;
   }
 
   public async start(): Promise<{ port: number; host: string; url: string }> {
@@ -97,7 +112,6 @@ export class TelemetryServer {
     this.status = 'stopping';
     this.sseManager.closeAll();
 
-    // Node 18.2+ allows closing idle or all connections for immediate shutdown
     if (typeof (this.server as any).closeIdleConnections === 'function') {
       (this.server as any).closeIdleConnections();
     }
@@ -197,8 +211,11 @@ export class TelemetryServer {
     // CORS preflight
     if (this.config.cors) {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Last-Event-ID, Authorization');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Origin, X-Requested-With, Content-Type, Accept, Last-Event-ID, Authorization'
+      );
       if (method === 'OPTIONS') {
         res.writeHead(204);
         res.end();
@@ -217,7 +234,7 @@ export class TelemetryServer {
       }
     }
 
-    // Routing
+    // Routing: Static Web Dashboard
     if (method === 'GET' && (pathname === '/' || pathname === '/dashboard')) {
       const html = renderDashboardHtml();
       res.writeHead(200, {
@@ -228,16 +245,19 @@ export class TelemetryServer {
       return;
     }
 
+    // Routing: SSE Events Stream
     if (method === 'GET' && (pathname === '/api/events' || pathname === '/events')) {
       this.sseManager.handleConnection(req, res, this.buffer);
       return;
     }
 
+    // Routing: Telemetry Status & Stats
     if (method === 'GET' && (pathname === '/api/status' || pathname === '/status')) {
       this.sendJson(res, 200, this.getStats());
       return;
     }
 
+    // Routing: History query
     if (method === 'GET' && (pathname === '/api/history' || pathname === '/history')) {
       const limit = parsedUrl.searchParams.get('limit')
         ? parseInt(parsedUrl.searchParams.get('limit')!, 10)
@@ -251,6 +271,7 @@ export class TelemetryServer {
       return;
     }
 
+    // Routing: Latest Report
     if (method === 'GET' && (pathname === '/api/report' || pathname === '/report')) {
       if (this.latestReport) {
         this.sendJson(res, 200, this.latestReport);
@@ -260,6 +281,7 @@ export class TelemetryServer {
       return;
     }
 
+    // Routing: Latest Trajectory
     if (method === 'GET' && (pathname === '/api/trajectory' || pathname === '/trajectory')) {
       if (this.latestTrajectory) {
         this.sendJson(res, 200, this.latestTrajectory);
@@ -269,6 +291,13 @@ export class TelemetryServer {
       return;
     }
 
+    // Routing: Interactive Steering Control APIs
+    if (pathname.startsWith('/api/control')) {
+      await this.handleControlRequest(pathname, method, req, res, parsedUrl);
+      return;
+    }
+
+    // Routing: Ingest external events
     if (method === 'POST' && (pathname === '/api/events' || pathname === '/events')) {
       const rawBody = await this.readRequestBody(req);
       try {
@@ -285,6 +314,100 @@ export class TelemetryServer {
       } catch (err: any) {
         this.sendJson(res, 400, { error: 'Invalid event payload', message: err.message });
       }
+      return;
+    }
+
+    this.sendJson(res, 404, { error: `Not Found: ${method} ${pathname}` });
+  }
+
+  private async handleControlRequest(
+    pathname: string,
+    method: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL
+  ): Promise<void> {
+    if (!this.steering) {
+      this.sendJson(res, 503, {
+        error: 'Steering controller not attached',
+        message: 'Interactive steering is not enabled for this telemetry instance',
+      });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/control/state') {
+      this.sendJson(res, 200, this.steering.getState());
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/control/pause') {
+      const rawBody = await this.readRequestBody(req);
+      let reason: string | undefined;
+      if (rawBody.trim()) {
+        try {
+          const body = JSON.parse(rawBody);
+          reason = body.reason;
+        } catch {
+          // ignore parse error for optional reason
+        }
+      }
+      this.steering.pause(reason || 'Manual pause from telemetry API');
+      this.sendJson(res, 200, { success: true, state: this.steering.getState() });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/control/resume') {
+      const rawBody = await this.readRequestBody(req);
+      let payload: any = { type: 'continue' };
+      if (rawBody.trim()) {
+        try {
+          payload = JSON.parse(rawBody);
+        } catch {
+          // default continue
+        }
+      }
+      this.steering.resume(payload);
+      this.sendJson(res, 200, { success: true, state: this.steering.getState() });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/control/intervene') {
+      const rawBody = await this.readRequestBody(req);
+      try {
+        const body = JSON.parse(rawBody);
+        const action = InterventionActionSchema.parse(body);
+        this.steering.intervene(action);
+        this.sendJson(res, 200, { success: true, action, state: this.steering.getState() });
+      } catch (err: any) {
+        this.sendJson(res, 400, { error: 'Invalid intervention action payload', message: err.message });
+      }
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/control/breakpoint') {
+      const rawBody = await this.readRequestBody(req);
+      try {
+        const body = JSON.parse(rawBody);
+        const ruleData = AddBreakpointRequestSchema.parse(body);
+        const rule = this.steering.addBreakpoint({
+          id: ruleData.id || `bp_${Date.now()}`,
+          ...ruleData,
+        });
+        this.sendJson(res, 201, { success: true, breakpoint: rule });
+      } catch (err: any) {
+        this.sendJson(res, 400, { error: 'Invalid breakpoint configuration', message: err.message });
+      }
+      return;
+    }
+
+    if (method === 'DELETE' && pathname === '/api/control/breakpoint') {
+      const id = url.searchParams.get('id');
+      if (!id) {
+        this.sendJson(res, 400, { error: 'Missing "id" parameter to delete breakpoint' });
+        return;
+      }
+      const removed = this.steering.removeBreakpoint(id);
+      this.sendJson(res, 200, { success: removed, id });
       return;
     }
 

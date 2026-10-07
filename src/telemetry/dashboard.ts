@@ -8,6 +8,7 @@ export function renderDashboardHtml(options?: { title?: string; apiBase?: string
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
+  <!-- agent-harness live dashboard -->
   <style>
     :root {
       --bg: #090d16;
@@ -50,505 +51,568 @@ export function renderDashboardHtml(options?: { title?: string; apiBase?: string
       font-size: 1.15rem;
       letter-spacing: -0.02em;
     }
-    .brand-badge {
-      background: linear-gradient(135deg, #0284c7, #38bdf8);
-      color: #fff;
-      font-size: 0.72rem;
-      font-weight: 700;
+    .badge {
+      font-size: 0.75rem;
+      font-weight: 600;
       padding: 3px 8px;
-      border-radius: 999px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+      border-radius: 9999px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3);
     }
-    .conn-status {
+    .connection-status {
       display: flex;
       align-items: center;
       gap: 8px;
       font-size: 0.85rem;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background-color: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border);
+      color: var(--text-muted);
     }
     .dot {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
-      background-color: var(--warning);
-      transition: background-color 0.3s;
+      background: var(--text-muted);
+      display: inline-block;
+      transition: background 0.3s;
     }
-    .dot.connected { background-color: var(--success); box-shadow: 0 0 8px var(--success); }
-    .dot.disconnected { background-color: var(--danger); box-shadow: 0 0 8px var(--danger); }
-    
-    main {
-      flex: 1;
-      padding: 24px;
-      max-width: 1600px;
-      width: 100%;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
+    .dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
     }
-    .stats-grid {
+    .dot.disconnected {
+      background: var(--danger);
+    }
+    .dot.paused {
+      background: var(--warning);
+      box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.2); opacity: 0.7; }
+    }
+    .container {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: 340px 1fr;
       gap: 16px;
-    }
-    .stat-card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .stat-label {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-    .stat-value {
-      font-size: 1.5rem;
-      font-weight: 700;
-      font-family: var(--font-mono);
-      color: var(--text);
-    }
-    .stat-sub {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .content-layout {
-      display: grid;
-      grid-template-columns: 1fr 380px;
-      gap: 20px;
+      padding: 16px 24px;
       flex: 1;
-    }
-    @media (max-width: 1024px) {
-      .content-layout { grid-template-columns: 1fr; }
-    }
-
-    .panel {
-      background-color: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      display: flex;
-      flex-direction: column;
+      height: calc(100vh - 65px);
+      box-sizing: border-box;
       overflow: hidden;
     }
-    .panel-header {
-      padding: 14px 20px;
-      border-bottom: 1px solid var(--border);
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card h3 {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background-color: rgba(255, 255, 255, 0.02);
     }
-    .panel-title {
-      font-size: 0.95rem;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .controls {
-      display: flex;
-      align-items: center;
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 10px;
+    }
+    .stat-box {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text);
+      font-family: var(--font-mono);
+    }
+    .status-tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .status-tag.running { background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+    .status-tag.paused { background: rgba(251, 191, 36, 0.2); color: var(--warning); border: 1px solid var(--warning); }
+    .status-tag.pass { background: rgba(52, 211, 153, 0.2); color: var(--success); }
+    .status-tag.fail { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
+
+    /* Steering Control Console styles */
+    .control-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .btn {
+      background: #1f2937;
+      color: var(--text);
+      border: 1px solid var(--border-focus);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #374151; }
+    .btn.btn-primary { background: #0284c7; border-color: #38bdf8; color: #fff; }
+    .btn.btn-primary:hover { background: #0369a1; }
+    .btn.btn-success { background: #059669; border-color: #34d399; color: #fff; }
+    .btn.btn-success:hover { background: #047857; }
+    .btn.btn-warning { background: #d97706; border-color: #fbbf24; color: #fff; }
+    .btn.btn-warning:hover { background: #b45309; }
+    .btn.btn-danger { background: #dc2626; border-color: #f87171; color: #fff; }
+    .btn.btn-danger:hover { background: #b91c1c; }
+
+    .breakpoint-banner {
+      display: none;
+      background: rgba(251, 191, 36, 0.15);
+      border: 1px solid var(--warning);
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .breakpoint-banner.active {
+      display: block;
+    }
+    .breakpoint-title {
+      color: var(--warning);
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+    }
+    .breakpoint-desc {
+      font-size: 0.8rem;
+      color: var(--text);
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .main-view {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: hidden;
+      height: 100%;
+    }
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 16px;
+    }
+    .filter-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
     .filter-btn {
       background: transparent;
       border: 1px solid var(--border);
       color: var(--text-muted);
       padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 0.78rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
       cursor: pointer;
       transition: all 0.2s;
     }
-    .filter-btn:hover, .filter-btn.active {
-      color: var(--text);
-      background-color: rgba(56, 189, 248, 0.15);
+    .filter-btn.active, .filter-btn:hover {
+      background: rgba(56, 189, 248, 0.1);
+      color: var(--accent);
       border-color: var(--accent);
     }
-    .btn-action {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 4px 12px;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      cursor: pointer;
-    }
-    .btn-action:hover {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    .events-feed {
+    .events-panel {
       flex: 1;
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
       overflow-y: auto;
-      max-height: 650px;
-      font-family: var(--font-mono);
-      font-size: 0.82rem;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
     }
     .event-item {
-      padding: 10px 18px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      cursor: pointer;
-      transition: background-color 0.15s;
-    }
-    .event-item:hover {
-      background-color: rgba(255, 255, 255, 0.03);
-    }
-    .event-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .event-meta {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .badge {
-      padding: 2px 8px;
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 3px solid var(--border);
       border-radius: 4px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .badge-scenario { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #0284c7; }
-    .badge-turn { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #9333ea; }
-    .badge-tool { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #d97706; }
-    .badge-sandbox { background: rgba(20, 184, 166, 0.2); color: #2dd4bf; border: 1px solid #0d9488; }
-    .badge-error { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #dc2626; }
-    .badge-budget { background: rgba(234, 88, 12, 0.2); color: #fb923c; border: 1px solid #c2410c; }
-    .badge-other { background: rgba(156, 163, 175, 0.2); color: #d1d5db; border: 1px solid #4b5563; }
-
-    .event-time { color: var(--text-muted); font-size: 0.75rem; }
-    .event-summary { color: var(--text); font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 0.85rem; }
-    .event-detail {
-      background-color: #050810;
-      padding: 8px 12px;
-      border-radius: 6px;
-      border: 1px solid #1e293b;
-      margin-top: 4px;
-      white-space: pre-wrap;
-      word-break: break-all;
-      color: #94a3b8;
-      display: none;
-    }
-    .event-item.open .event-detail { display: block; }
-
-    .summary-section {
-      padding: 16px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .summary-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .summary-title {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-    .summary-box {
-      background: rgba(0, 0, 0, 0.25);
-      border: 1px solid var(--border);
-      border-radius: 6px;
       padding: 10px 14px;
       font-size: 0.85rem;
-      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: background 0.2s;
     }
+    .event-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .event-item.tool { border-left-color: var(--accent); }
+    .event-item.turn { border-left-color: #a78bfa; }
+    .event-item.scenario { border-left-color: #ec4899; }
+    .event-item.error { border-left-color: var(--danger); background: rgba(248, 113, 113, 0.05); }
+    .event-item.breakpoint { border-left-color: var(--warning); background: rgba(251, 191, 36, 0.08); }
 
+    .event-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .event-type {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text);
+    }
+    .event-body {
+      font-size: 0.85rem;
+      word-break: break-word;
+    }
+    .event-payload {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      background: #0d1117;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 8px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+      color: #94a3b8;
+      display: none;
+      margin-top: 6px;
+    }
+    .toggle-payload {
+      font-size: 0.75rem;
+      color: var(--accent);
+      cursor: pointer;
+      align-self: flex-start;
+      margin-top: 4px;
+      user-select: none;
+    }
     .assertion-item {
       display: flex;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
       padding: 6px 0;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      font-size: 0.82rem;
+      font-size: 0.8rem;
     }
     .assertion-item:last-child { border-bottom: none; }
-    .status-tag {
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-    .status-tag.pass { background: rgba(52, 211, 153, 0.15); color: var(--success); }
-    .status-tag.fail { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
   </style>
 </head>
 <body>
   <header>
     <div class="brand">
-      <span>agent-harness</span>
-      <span class="brand-badge">Live Telemetry</span>
+      <span>Agent Harness</span>
+      <span class="badge">Telemetry & Steering</span>
     </div>
-    <div class="conn-status">
-      <div id="connDot" class="dot"></div>
+    <div class="connection-status">
+      <span id="connDot" class="dot"></span>
       <span id="connText">Connecting...</span>
     </div>
   </header>
 
-  <main>
-    <div class="stats-grid">
-      <div class="stat-card">
-        <span class="stat-label">Scenario</span>
-        <span id="statScenario" class="stat-value" style="font-size:1.15rem;">-</span>
-        <span id="statStatus" class="stat-sub">Waiting for execution...</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Total Events</span>
-        <span id="statEvents" class="stat-value">0</span>
-        <span id="statRate" class="stat-sub">Buffer: 0 events</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Execution Turns</span>
-        <span id="statTurns" class="stat-value">0</span>
-        <span id="statTokens" class="stat-sub">Tokens: 0</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Tool Invocations</span>
-        <span id="statTools" class="stat-value">0</span>
-        <span id="statSandbox" class="stat-sub">Backend: local</span>
-      </div>
-    </div>
-
-    <div class="content-layout">
-      <div class="panel">
-        <div class="panel-header">
-          <div class="panel-title">
-            <span>Execution Timeline</span>
-            <span id="eventCountBadge" style="font-size:0.75rem; color:var(--text-muted);">(0)</span>
+  <div class="container">
+    <div class="sidebar">
+      <div class="card">
+        <h3>
+          Scenario Overview
+          <span id="scenarioStatusBadge" class="status-tag">IDLE</span>
+        </h3>
+        <div style="font-size: 0.85rem; margin-bottom: 12px; color: var(--text-muted);" id="scenarioTitle">
+          Waiting for scenario execution...
+        </div>
+        <div class="stat-grid">
+          <div class="stat-box">
+            <div class="stat-label">Current Turn</div>
+            <div class="stat-value" id="turnVal">0</div>
           </div>
-          <div class="controls">
-            <button class="filter-btn active" data-filter="*">All</button>
-            <button class="filter-btn" data-filter="tool:*">Tools</button>
-            <button class="filter-btn" data-filter="turn:*">Turns</button>
-            <button class="filter-btn" data-filter="scenario:*">Scenario</button>
-            <button class="filter-btn" data-filter="error">Errors</button>
-            <button id="toggleScrollBtn" class="btn-action">Scroll: ON</button>
-            <button id="clearBtn" class="btn-action">Clear</button>
+          <div class="stat-box">
+            <div class="stat-label">Tool Calls</div>
+            <div class="stat-value" id="toolsVal">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Cumulative Tokens</div>
+            <div class="stat-value" id="tokensVal">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Elapsed (s)</div>
+            <div class="stat-value" id="timeVal">0.0</div>
           </div>
         </div>
-        <div id="eventsFeed" class="events-feed"></div>
       </div>
 
-      <div class="panel">
-        <div class="panel-header">
-          <div class="panel-title">Verification & Assertions</div>
+      <!-- Interactive Steering & HITL Console -->
+      <div class="card" id="steeringCard">
+        <h3>
+          Interactive Steering
+          <span id="steeringBadge" class="status-tag">ACTIVE</span>
+        </h3>
+        
+        <div id="breakpointBanner" class="breakpoint-banner">
+          <div class="breakpoint-title">⏸️ BREAKPOINT HIT</div>
+          <div id="breakpointDesc" class="breakpoint-desc">Execution suspended at breakpoint</div>
+          <div class="control-actions">
+            <button id="bannerResumeBtn" class="btn btn-success">Resume</button>
+            <button id="bannerInjectBtn" class="btn btn-primary">Inject Prompt</button>
+            <button id="bannerSkipBtn" class="btn btn-warning">Skip Tool</button>
+            <button id="bannerAbortBtn" class="btn btn-danger">Abort</button>
+          </div>
+        </div>
+
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+          Runtime Intervention Controls:
+        </div>
+        <div class="control-actions">
+          <button id="btnPause" class="btn btn-warning">Pause</button>
+          <button id="btnResume" class="btn btn-success">Resume</button>
+          <button id="btnInjectPrompt" class="btn">Guide Prompt</button>
+          <button id="btnAbort" class="btn btn-danger">Abort</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>
+          Verification & Assertions
           <span id="resultBadge" class="status-tag" style="display:none;"></span>
+        </h3>
+        <div id="assertionsList" style="max-height: 220px; overflow-y: auto;">
+          <div style="font-size: 0.8rem; color: var(--text-muted);">No assertions evaluated yet.</div>
         </div>
-        <div class="summary-section">
-          <div class="summary-group">
-            <span class="summary-title">Task Overview</span>
-            <div id="taskInstruction" class="summary-box">No scenario loaded yet.</div>
-          </div>
-          <div class="summary-group">
-            <span class="summary-title">Assertions Breakdown</span>
-            <div id="assertionsList" class="summary-box">
-              <span style="color:var(--text-muted);">Awaiting verification report...</span>
-            </div>
-          </div>
-          <div class="summary-group">
-            <span class="summary-title">Duration & Metrics</span>
-            <div id="metricsBox" class="summary-box">
-              Duration: - <br/>
-              Exit Status: pending
-            </div>
-          </div>
-        </div>
+        <div id="metricsBox" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 10px;"></div>
       </div>
     </div>
-  </main>
+
+    <div class="main-view">
+      <div class="controls-bar">
+        <div class="filter-group">
+          <button class="filter-btn active" data-filter="all">All Events</button>
+          <button class="filter-btn" data-filter="tool">Tools</button>
+          <button class="filter-btn" data-filter="turn">Turns</button>
+          <button class="filter-btn" data-filter="breakpoint">Breakpoints</button>
+          <button class="filter-btn" data-filter="error">Errors</button>
+        </div>
+        <div>
+          <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
+            <input type="checkbox" id="autoScrollCheck" checked style="vertical-align: middle;"> Auto Scroll
+          </label>
+        </div>
+      </div>
+
+      <div class="events-panel" id="eventsContainer">
+        <!-- Events rendered dynamically -->
+      </div>
+    </div>
+  </div>
 
   <script>
     (function() {
       const apiBase = '${apiBase}';
-      let eventCount = 0;
-      let toolCallCount = 0;
-      let turnCount = 0;
-      let tokenUsage = 0;
-      let activeFilter = '*';
-      let autoScroll = true;
-      let allEvents = [];
-
+      const eventsContainer = document.getElementById('eventsContainer');
       const connDot = document.getElementById('connDot');
       const connText = document.getElementById('connText');
-      const eventsFeed = document.getElementById('eventsFeed');
-      const statScenario = document.getElementById('statScenario');
-      const statStatus = document.getElementById('statStatus');
-      const statEvents = document.getElementById('statEvents');
-      const statRate = document.getElementById('statRate');
-      const statTurns = document.getElementById('statTurns');
-      const statTokens = document.getElementById('statTokens');
-      const statTools = document.getElementById('statTools');
-      const statSandbox = document.getElementById('statSandbox');
-      const eventCountBadge = document.getElementById('eventCountBadge');
-      const toggleScrollBtn = document.getElementById('toggleScrollBtn');
-      const clearBtn = document.getElementById('clearBtn');
-      const taskInstruction = document.getElementById('taskInstruction');
+      const scenarioTitle = document.getElementById('scenarioTitle');
+      const scenarioStatusBadge = document.getElementById('scenarioStatusBadge');
+      const turnVal = document.getElementById('turnVal');
+      const toolsVal = document.getElementById('toolsVal');
+      const tokensVal = document.getElementById('tokensVal');
+      const timeVal = document.getElementById('timeVal');
       const assertionsList = document.getElementById('assertionsList');
       const metricsBox = document.getElementById('metricsBox');
       const resultBadge = document.getElementById('resultBadge');
+      const autoScrollCheck = document.getElementById('autoScrollCheck');
+      const breakpointBanner = document.getElementById('breakpointBanner');
+      const breakpointDesc = document.getElementById('breakpointDesc');
 
-      function getBadgeClass(type) {
-        if (type.startsWith('scenario:')) return 'badge-scenario';
-        if (type.startsWith('turn:')) return 'badge-turn';
-        if (type.startsWith('tool:')) return 'badge-tool';
-        if (type.startsWith('sandbox:')) return 'badge-sandbox';
-        if (type === 'error') return 'badge-error';
-        if (type.startsWith('budget:')) return 'badge-budget';
-        return 'badge-other';
-      }
+      let currentFilter = 'all';
+      let eventCount = 0;
+      let toolCallCount = 0;
+      let startEpoch = null;
+      let timerInterval = null;
 
-      function formatEventSummary(evt) {
-        switch (evt.type) {
-          case 'scenario:start':
-            return 'Scenario started: ' + (evt.scenarioName || evt.scenarioId);
-          case 'scenario:complete':
-            return 'Scenario finished (' + (evt.status || 'done') + ') - ' + (evt.passed ? 'PASSED' : 'FAILED') + ' in ' + (evt.durationMs || 0) + 'ms';
-          case 'turn:start':
-            return 'Turn #' + evt.turnNumber + ' started: ' + (evt.prompt ? evt.prompt.slice(0, 60) + '...' : '');
-          case 'turn:complete':
-            return 'Turn #' + evt.turnNumber + ' completed. Cumulative tokens: ' + (evt.cumulativeTokens || 0);
-          case 'tool:start':
-            return 'Tool call: ' + evt.toolName + ' (callId: ' + evt.callId + ')';
-          case 'tool:end':
-            return 'Tool end: ' + evt.toolName + ' (' + (evt.durationMs || 0) + 'ms) - ' + (evt.result?.success ? 'Success' : 'Failed');
-          case 'sandbox:ready':
-            return 'Sandbox backend ready: ' + evt.backend + (evt.image ? ' (' + evt.image + ')' : '');
-          case 'sandbox:teardown':
-            return 'Sandbox backend teardown completed (' + evt.backend + ')';
-          case 'error':
-            return 'Error in ' + (evt.phase || 'unknown') + ': ' + evt.errorMessage;
-          case 'budget:warning':
-            return 'Budget warning [' + evt.budgetType + ']: ' + evt.message;
-          default:
-            return JSON.stringify(evt);
-        }
-      }
-
-      function renderEventItem(evt) {
-        const item = document.createElement('div');
-        item.className = 'event-item';
-        item.dataset.type = evt.type;
-
-        const timeStr = new Date(evt.timestamp || Date.now()).toLocaleTimeString();
-        const badgeClass = getBadgeClass(evt.type);
-        const summary = formatEventSummary(evt);
-
-        item.innerHTML = \`
-          <div class="event-top">
-            <div class="event-meta">
-              <span class="badge \${badgeClass}">\${evt.type}</span>
-              <span class="event-summary">\${escapeHtml(summary)}</span>
-            </div>
-            <span class="event-time">\${timeStr}</span>
-          </div>
-          <pre class="event-detail">\${escapeHtml(JSON.stringify(evt, null, 2))}</pre>
-        \`;
-
-        item.addEventListener('click', () => {
-          item.classList.toggle('open');
-        });
-
-        if (!matchesFilter(evt.type, activeFilter)) {
-          item.style.display = 'none';
-        }
-
-        eventsFeed.appendChild(item);
-        if (autoScroll) {
-          eventsFeed.scrollTop = eventsFeed.scrollHeight;
-        }
-      }
-
-      function escapeHtml(str) {
-        return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      }
-
-      function matchesFilter(type, filter) {
-        if (filter === '*') return true;
-        if (filter.endsWith(':*')) {
-          return type.startsWith(filter.slice(0, -2) + ':');
-        }
-        return type === filter;
-      }
-
-      function applyFilter() {
-        document.querySelectorAll('.event-item').forEach(el => {
-          el.style.display = matchesFilter(el.dataset.type, activeFilter) ? 'flex' : 'none';
-        });
-      }
-
+      // Filter buttons
       document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          activeFilter = btn.dataset.filter;
-          applyFilter();
+          currentFilter = btn.dataset.filter;
+          filterEvents();
         });
       });
 
-      toggleScrollBtn.addEventListener('click', () => {
-        autoScroll = !autoScroll;
-        toggleScrollBtn.textContent = 'Scroll: ' + (autoScroll ? 'ON' : 'PAUSED');
-      });
+      function filterEvents() {
+        const items = eventsContainer.querySelectorAll('.event-item');
+        items.forEach(el => {
+          if (currentFilter === 'all') {
+            el.style.display = 'flex';
+          } else if (currentFilter === 'tool' && el.classList.contains('tool')) {
+            el.style.display = 'flex';
+          } else if (currentFilter === 'turn' && el.classList.contains('turn')) {
+            el.style.display = 'flex';
+          } else if (currentFilter === 'breakpoint' && el.classList.contains('breakpoint')) {
+            el.style.display = 'flex';
+          } else if (currentFilter === 'error' && el.classList.contains('error')) {
+            el.style.display = 'flex';
+          } else {
+            el.style.display = 'none';
+          }
+        });
+      }
 
-      clearBtn.addEventListener('click', () => {
-        eventsFeed.innerHTML = '';
-        allEvents = [];
-        eventCountBadge.textContent = '(0)';
-      });
+      function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function renderEventItem(evt) {
+        eventCount++;
+        const item = document.createElement('div');
+        let categoryClass = 'custom';
+        if (evt.type.startsWith('tool:')) categoryClass = 'tool';
+        else if (evt.type.startsWith('turn:')) categoryClass = 'turn';
+        else if (evt.type.startsWith('scenario:')) categoryClass = 'scenario';
+        else if (evt.type.startsWith('breakpoint:') || evt.type.startsWith('steering:')) categoryClass = 'breakpoint';
+        else if (evt.type === 'error') categoryClass = 'error';
+
+        item.className = 'event-item ' + categoryClass;
+        item.dataset.type = evt.type;
+
+        let summaryText = '';
+        if (evt.type === 'scenario:start') {
+          summaryText = 'Scenario started: ' + (evt.scenarioName || evt.scenarioId);
+        } else if (evt.type === 'turn:start') {
+          summaryText = 'Turn #' + evt.turnNumber + ' started: "' + (evt.prompt || '').slice(0, 80) + '..."';
+        } else if (evt.type === 'tool:start') {
+          summaryText = 'Calling tool: ' + evt.toolName + '(' + JSON.stringify(evt.arguments || {}).slice(0, 100) + ')';
+        } else if (evt.type === 'tool:end') {
+          const status = evt.result?.success ? 'success' : 'failed';
+          summaryText = 'Tool ' + evt.toolName + ' completed with ' + status + ' (' + (evt.durationMs || 0) + 'ms)';
+        } else if (evt.type === 'breakpoint:hit') {
+          summaryText = 'Breakpoint hit: ' + (evt.hit?.reason || evt.hit?.breakpoint?.id || 'paused');
+        } else if (evt.type === 'breakpoint:resume') {
+          summaryText = 'Resumed from breakpoint: Action=' + evt.action?.type;
+        } else if (evt.type === 'scenario:complete') {
+          summaryText = 'Scenario finished. Passed: ' + evt.passed;
+        } else if (evt.type === 'error') {
+          summaryText = 'Error [' + evt.phase + ']: ' + evt.errorMessage;
+        } else {
+          summaryText = evt.type + ' event';
+        }
+
+        const dateStr = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+        item.innerHTML = \`
+          <div class="event-header">
+            <span class="event-type">\${escapeHtml(evt.type)}</span>
+            <span>\${dateStr}</span>
+          </div>
+          <div class="event-body">\${escapeHtml(summaryText)}</div>
+          <span class="toggle-payload">Show Details</span>
+          <pre class="event-payload">\${escapeHtml(JSON.stringify(evt, null, 2))}</pre>
+        \`;
+
+        const toggleBtn = item.querySelector('.toggle-payload');
+        const payloadPre = item.querySelector('.event-payload');
+        toggleBtn.addEventListener('click', () => {
+          if (payloadPre.style.display === 'block') {
+            payloadPre.style.display = 'none';
+            toggleBtn.textContent = 'Show Details';
+          } else {
+            payloadPre.style.display = 'block';
+            toggleBtn.textContent = 'Hide Details';
+          }
+        });
+
+        if (currentFilter !== 'all') {
+          if (
+            (currentFilter === 'tool' && !categoryClass.includes('tool')) ||
+            (currentFilter === 'turn' && !categoryClass.includes('turn')) ||
+            (currentFilter === 'breakpoint' && !categoryClass.includes('breakpoint')) ||
+            (currentFilter === 'error' && !categoryClass.includes('error'))
+          ) {
+            item.style.display = 'none';
+          }
+        }
+
+        eventsContainer.appendChild(item);
+
+        if (autoScrollCheck.checked) {
+          eventsContainer.scrollTop = eventsContainer.scrollHeight;
+        }
+      }
 
       function handleIncomingEvent(evt) {
-        allEvents.push(evt);
-        eventCount++;
-        statEvents.textContent = eventCount;
-        eventCountBadge.textContent = '(' + allEvents.length + ')';
-        statRate.textContent = 'Buffer: ' + allEvents.length + ' events';
+        if (!evt || !evt.type) return;
 
         if (evt.type === 'scenario:start') {
-          statScenario.textContent = evt.scenarioName || evt.scenarioId;
-          statStatus.textContent = 'Running';
-          statStatus.style.color = 'var(--accent)';
+          scenarioTitle.textContent = evt.scenarioName || evt.scenarioId;
+          scenarioStatusBadge.className = 'status-tag running';
+          scenarioStatusBadge.textContent = 'RUNNING';
+          startEpoch = Date.now();
+          if (timerInterval) clearInterval(timerInterval);
+          timerInterval = setInterval(() => {
+            if (startEpoch) {
+              timeVal.textContent = ((Date.now() - startEpoch) / 1000).toFixed(1);
+            }
+          }, 200);
+        } else if (evt.type === 'turn:start') {
+          turnVal.textContent = evt.turnNumber;
+        } else if (evt.type === 'turn:complete') {
+          if (evt.cumulativeTokens) tokensVal.textContent = evt.cumulativeTokens;
         } else if (evt.type === 'tool:start') {
           toolCallCount++;
-          statTools.textContent = toolCallCount;
-        } else if (evt.type === 'turn:start') {
-          turnCount = Math.max(turnCount, evt.turnNumber || 0);
-          statTurns.textContent = turnCount;
-        } else if (evt.type === 'turn:complete') {
-          if (evt.cumulativeTokens) {
-            tokenUsage = evt.cumulativeTokens;
-            statTokens.textContent = 'Tokens: ' + tokenUsage;
-          }
-        } else if (evt.type === 'sandbox:ready') {
-          statSandbox.textContent = 'Backend: ' + evt.backend + (evt.image ? ' (' + evt.image + ')' : '');
+          toolsVal.textContent = toolCallCount;
+        } else if (evt.type === 'breakpoint:hit') {
+          scenarioStatusBadge.className = 'status-tag paused';
+          scenarioStatusBadge.textContent = 'PAUSED';
+          connDot.className = 'dot paused';
+          breakpointBanner.classList.add('active');
+          breakpointDesc.textContent = (evt.hit?.reason || 'Breakpoint triggered: ' + (evt.hit?.breakpoint?.id || ''));
+        } else if (evt.type === 'breakpoint:resume') {
+          scenarioStatusBadge.className = 'status-tag running';
+          scenarioStatusBadge.textContent = 'RUNNING';
+          connDot.className = 'dot connected';
+          breakpointBanner.classList.remove('active');
         } else if (evt.type === 'scenario:complete') {
-          statStatus.textContent = evt.passed ? 'Completed (PASSED)' : 'Completed (FAILED)';
-          statStatus.style.color = evt.passed ? 'var(--success)' : 'var(--danger)';
+          if (timerInterval) clearInterval(timerInterval);
+          breakpointBanner.classList.remove('active');
+          if (evt.passed) {
+            scenarioStatusBadge.className = 'status-tag pass';
+            scenarioStatusBadge.textContent = 'PASSED';
+          } else {
+            scenarioStatusBadge.className = 'status-tag fail';
+            scenarioStatusBadge.textContent = evt.status?.toUpperCase() || 'FAILED';
+          }
           if (evt.report) {
             renderReport(evt.report);
           }
@@ -584,6 +648,62 @@ export function renderDashboardHtml(options?: { title?: string; apiBase?: string
         }
       }
 
+      // Steering Control API Handlers
+      async function sendControl(endpoint, body) {
+        try {
+          const res = await fetch(apiBase + '/api/control/' + endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          return await res.json();
+        } catch (err) {
+          console.error('Steering API error:', err);
+        }
+      }
+
+      document.getElementById('btnPause')?.addEventListener('click', () => {
+        sendControl('pause', { reason: 'Operator requested pause via dashboard' });
+      });
+
+      document.getElementById('btnResume')?.addEventListener('click', () => {
+        sendControl('resume', { type: 'continue' });
+      });
+
+      document.getElementById('bannerResumeBtn')?.addEventListener('click', () => {
+        sendControl('resume', { type: 'continue' });
+      });
+
+      document.getElementById('btnInjectPrompt')?.addEventListener('click', () => {
+        const prompt = window.prompt('Enter guidance prompt to inject into agent:');
+        if (prompt) {
+          sendControl('intervene', { type: 'continue', prompt });
+        }
+      });
+
+      document.getElementById('bannerInjectBtn')?.addEventListener('click', () => {
+        const prompt = window.prompt('Enter guidance prompt to inject into agent:');
+        if (prompt) {
+          sendControl('intervene', { type: 'continue', prompt });
+        }
+      });
+
+      document.getElementById('bannerSkipBtn')?.addEventListener('click', () => {
+        sendControl('intervene', { type: 'skip_tool', reason: 'Skipped via dashboard' });
+      });
+
+      document.getElementById('bannerAbortBtn')?.addEventListener('click', () => {
+        if (window.confirm('Are you sure you want to abort the current scenario?')) {
+          sendControl('intervene', { type: 'abort', reason: 'Aborted via dashboard' });
+        }
+      });
+
+      document.getElementById('btnAbort')?.addEventListener('click', () => {
+        if (window.confirm('Are you sure you want to abort the execution?')) {
+          sendControl('intervene', { type: 'abort', reason: 'Aborted via dashboard' });
+        }
+      });
+
       // Load initial history
       fetch(apiBase + '/api/history?limit=100')
         .then(res => res.json())
@@ -616,7 +736,6 @@ export function renderDashboardHtml(options?: { title?: string; apiBase?: string
           connText.textContent = 'Live SSE Connected';
         });
 
-        // Listen for all generic messages
         es.onmessage = function(e) {
           try {
             const evt = JSON.parse(e.data);

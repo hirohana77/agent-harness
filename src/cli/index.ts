@@ -16,6 +16,7 @@ import { JsonLinesStreamObserver } from "../events/observers/jsonl.js";
 import { TrajectoryStreamObserver } from "../events/types.js";
 import { TelemetryServer } from "../telemetry/server.js";
 import { TelemetryObserver } from "../telemetry/observer.js";
+import { SteeringController } from "../steering/index.js";
 
 const program = new Command();
 
@@ -196,6 +197,8 @@ program
   .option("--telemetry-host <host>", "Host for telemetry server (default: 127.0.0.1)", "127.0.0.1")
   .option("--telemetry-remote <url>", "Forward execution events to remote telemetry server URL")
   .option("--keep-alive", "Keep telemetry dashboard server active after run completes until interrupted")
+  .option("-i, --interactive", "Enable interactive steering and breakpoint console")
+  .option("--breakpoint <rules...>", "Set initial breakpoint rules (e.g. tool:bash, error:3, turn:5)")
   .action(async (options) => {
     let telemetryServer: TelemetryServer | undefined;
     try {
@@ -220,10 +223,27 @@ program
         observers.push(new JsonLinesStreamObserver(options.streamJsonl));
       }
 
+      let steering: SteeringController | undefined;
+      if (options.interactive || options.breakpoint || options.telemetry) {
+        steering = new SteeringController();
+        if (options.breakpoint && Array.isArray(options.breakpoint)) {
+          for (const bpStr of options.breakpoint) {
+            if (bpStr.startsWith('tool:')) {
+              steering.addBreakpoint({ id: 'cli_' + bpStr, type: 'tool', toolPattern: bpStr.slice(5) });
+            } else if (bpStr.startsWith('error:')) {
+              steering.addBreakpoint({ id: 'cli_' + bpStr, type: 'error_count', errorThreshold: parseInt(bpStr.slice(6), 10) });
+            } else if (bpStr.startsWith('turn:')) {
+              steering.addBreakpoint({ id: 'cli_' + bpStr, type: 'turn', turnThreshold: parseInt(bpStr.slice(5), 10) });
+            }
+          }
+        }
+      }
+
       if (options.telemetry) {
         telemetryServer = new TelemetryServer({
           port: options.telemetryPort,
           host: options.telemetryHost,
+          steering,
         });
         const { url } = await telemetryServer.start();
         console.log(chalk.cyan(`📡 Live Telemetry Dashboard running at: ${chalk.bold.underline(`${url}/dashboard`)}`));
@@ -261,7 +281,7 @@ program
             totalTokens: 150,
           });
         },
-        { observers }
+        { observers, steering }
       );
 
       // Ensure any stream observers close their underlying files

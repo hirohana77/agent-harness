@@ -36,7 +36,7 @@ export const InterventionActionSchema = z.object({
   overrideResult: z
     .object({
       success: z.boolean(),
-      output: z.unknown().optional(),
+      output: z.string().optional(),
       error: z.string().optional(),
       exitCode: z.number().optional(),
       metadata: z.record(z.string(), z.unknown()).optional(),
