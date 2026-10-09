@@ -418,6 +418,61 @@ const { report, trajectory } = await AgentHarness.runScenario(
 );
 ```
 
+## Differential Trajectory Comparator & Regression Analyzer
+
+When iterating on agent prompts, LLM models (e.g. Claude 3.5 Sonnet vs GPT-4o), or evaluating unsteered vs steered runs, simple binary pass/fail results conceal critical behavioral regressions. The **Differential Trajectory Comparator** provides step-by-step sequence alignment, regression severity scoring, anomaly detection, and root-cause divergence analysis.
+
+### 1. Key Capabilities
+- **Dynamic Sequence Alignment**: Needleman-Wunsch sequence alignment adapted for agent execution steps, matching tool calls and thoughts even across reordered or exploratory actions.
+- **Root-Cause Divergence Pinpointing**: Detects and highlights the exact *First Divergence Step* where candidate execution deviated (e.g. tool mismatch, altered arguments, or execution error).
+- **Comprehensive Metric Deltas**: Detailed delta tracking for turns, tool invocations, prompt/completion tokens, latency, and cost.
+- **Automated Anomaly Detection**:
+  - `loop_detected`: Repetitive tool invocation loops (e.g. identical command called $\ge 3$ times).
+  - `error_spike`: Tool failure rate escalation.
+  - `token_explosion`: Significant token inflation above user thresholds (e.g. $+50\%$).
+  - `empty_turn`: Ineffective turns lacking tool calls or responses.
+  - `rapid_failure`: Premature termination or early crash.
+- **Multi-Format Visual Diff Reporters**:
+  - `terminal`: Rich ANSI color side-by-side terminal diff with severity badges and step tags (`[MATCH]`, `[MODIFIED]`, `[ADDED]`, `[REMOVED]`).
+  - `markdown`: GitHub PR-ready Markdown report with summary tables, metrics, and step alignments.
+  - `html`: Standalone obsidian-dark styled HTML diff dashboard with interactive cards and tables.
+  - `json`: Schema-validated JSON report for programmatic CI/CD integration.
+- **CI/CD Quality Gating**: Exit with code `1` on detected regressions via `--fail-on-regression`.
+
+### 2. CLI Usage
+```bash
+# Compare two trajectories in terminal format
+agent-harness diff baseline.json candidate.json
+
+# Generate Markdown diff for GitHub Pull Request summary
+agent-harness diff baseline.json candidate.json --format markdown --output diff-report.md
+
+# Generate standalone HTML visualization
+agent-harness diff baseline.json candidate.json --format html --output diff-dashboard.html
+
+# Fail CI pipeline if functional or stability regression is detected
+agent-harness diff baseline.json candidate.json --fail-on-regression --token-ratio 0.4
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import { TrajectoryComparator, renderTrajectoryDiff } from "agent-harness";
+
+// Compare two trajectory artifacts
+const diff = TrajectoryComparator.compare(baselineTrajectory, candidateTrajectory, {
+  strictArgs: false,
+  tokenRegressionRatio: 0.5,
+  minSimilarityThreshold: 0.6,
+});
+
+console.log("Regression detected?", diff.regression.isRegression);
+console.log("Severity:", diff.regression.severity); // "identical" | "equivalent" | "minor_drift" | "regression" | "critical_failure"
+console.log("First divergence:", diff.firstDivergence?.description);
+
+// Render markdown report
+const markdown = renderTrajectoryDiff(diff, "markdown");
+```
+
 ## Architecture Specification
 
 For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).

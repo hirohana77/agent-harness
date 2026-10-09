@@ -347,6 +347,61 @@ const { report, trajectory } = await AgentHarness.runScenario(
 );
 ```
 
+## 差分轨迹对比与回归分析引擎 (Differential Trajectory Comparator)
+
+在自主智能体研发与评测过程中，无论进行提示词优化、底层大模型选型（如 Claude 3.5 Sonnet 与 GPT-4o 评测比对），还是对比无干预与人类在环（HITL）调优效果，单一的最终断言成功/失败均无法解释执行过程中的隐蔽退化。**差分轨迹对比与回归分析引擎** 为智能体轨迹提供了基于序列对齐算法的逐步比对、回归严重度评分、多维异动检测与根因定位能力。
+
+### 1. 核心能力
+- **动态序列对齐 (Dynamic Sequence Alignment)**：基于 Needleman-Wunsch 动态规划全局序列对齐算法，自适应对齐工具调用序列与思考过程，精确识别并标记重排或探索性动作。
+- **根因分歧点精准定位 (Root-Cause Divergence)**：自动检测并高亮智能体行为发生偏离的**首个分歧步骤 (First Divergence Step)**，细分为工具名称不匹配、参数偏移、工具报错、或过早终止。
+- **全方位指标差分矩阵**：细粒度统计轮次差（Turns Delta）、工具调用量差（Tool Calls Delta）、Prompt/Completion/Total Token 消耗差、耗时及推理成本差。
+- **智能轨迹异常检测 (Anomaly Detection)**：
+  - `loop_detected`：循环死循环调用检测（同一工具及完全相同入参连续调用 $\ge 3$ 次）。
+  - `error_spike`：工具执行报错激增检测。
+  - `token_explosion`：Token 异常暴涨检测（超出预设水位如 $+50\%$）。
+  - `empty_turn`：无工具调用且无有效回复的空轮次检测。
+  - `rapid_failure`：过早崩溃或异常退出检测。
+- **多格式可视化差分报告**：
+  - `terminal`：高亮 ANSI 彩色终端对比，带有严重度徽章与步骤对齐标签（`[MATCH]`、`[MODIFIED]`、`[ADDED]`、`[REMOVED]`）。
+  - `markdown`：适配 GitHub PR 评论的 Markdown 格式报告，包含指标卡片、工具分布表与对齐轨迹详情。
+  - `html`：黑曜石暗黑极简风格的独立 HTML 大屏报告，内置指标卡、分歧警告与响应式数据表格。
+  - `json`：符合严格 Zod Schema 的机器可读结构化数据，供自动化 CI 流水线二次消费。
+- **CI/CD 回归门禁管控**：命令行提供 `--fail-on-regression` 标志，当检测到功能或稳定性退化时返回非零退出码（`1`）。
+
+### 2. 命令行使用示例 (CLI)
+```bash
+# 终端内比对两个轨迹文件
+agent-harness diff baseline.json candidate.json
+
+# 生成 Markdown 格式报告供 GitHub PR 汇总使用
+agent-harness diff baseline.json candidate.json --format markdown --output diff-report.md
+
+# 生成独立 HTML 可视化差分报告
+agent-harness diff baseline.json candidate.json --format html --output diff-report.html
+
+# 在 CI 流水线中进行防回归门禁拦截（若退化则退出码为 1）
+agent-harness diff baseline.json candidate.json --fail-on-regression --token-ratio 0.4
+```
+
+### 3. SDK 编程接口示例
+```typescript
+import { TrajectoryComparator, renderTrajectoryDiff } from "agent-harness";
+
+// 对比两条轨迹文件对象
+const diff = TrajectoryComparator.compare(baselineTrajectory, candidateTrajectory, {
+  strictArgs: false,
+  tokenRegressionRatio: 0.5,
+  minSimilarityThreshold: 0.6,
+});
+
+console.log("是否存在回归:", diff.regression.isRegression);
+console.log("严重程度评分:", diff.regression.severity); // "identical" | "equivalent" | "minor_drift" | "regression" | "critical_failure"
+console.log("首个分歧点:", diff.firstDivergence?.description);
+
+// 渲染为 Markdown 文本
+const markdown = renderTrajectoryDiff(diff, "markdown");
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。
