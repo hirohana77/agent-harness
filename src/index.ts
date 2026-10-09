@@ -42,3 +42,6 @@ export * from './telemetry/index.js';
 export * from './steering/types.js';
 export * from './steering/schemas.js';
 export * from './steering/index.js';
+export * from './comparator/types.js';
+export * from './comparator/schemas.js';
+export * from './comparator/index.js';
