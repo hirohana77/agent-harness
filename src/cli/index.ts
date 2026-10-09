@@ -488,4 +488,80 @@ swebenchCmd
     }
   });
 
+// diff command
+program
+  .command("diff")
+  .description("Compare two agent trajectories or harness reports to detect regressions and step divergence")
+  .argument("<baseline>", "Path to baseline trajectory or harness report JSON")
+  .argument("<candidate>", "Path to candidate trajectory or harness report JSON")
+  .option("-f, --format <format>", "Diff report format: terminal, markdown, html, json", "terminal")
+  .option("-o, --output <path>", "File path to save the diff report output")
+  .option("--strict-args", "Enforce strict comparison on tool argument JSON payloads", false)
+  .option("--token-ratio <ratio>", "Token regression threshold ratio (default 0.5)", "0.5")
+  .option("--min-similarity <score>", "Minimum similarity threshold for step alignment (0-1)", "0.6")
+  .option("--fail-on-regression", "Exit with non-zero code (1) if a regression is detected", false)
+  .action(async (baselinePath, candidatePath, options) => {
+    try {
+      const { TrajectoryComparator } = await import("../comparator/comparator.js");
+      const { renderTrajectoryDiff } = await import("../comparator/reporters/index.js");
+
+      const baseRaw = JSON.parse(await fs.readFile(path.resolve(baselinePath), "utf8"));
+      const candRaw = JSON.parse(await fs.readFile(path.resolve(candidatePath), "utf8"));
+
+      const compareOptions = {
+        strictArgs: Boolean(options.strictArgs),
+        tokenRegressionRatio: parseFloat(options.tokenRatio) || 0.5,
+        minSimilarityThreshold: parseFloat(options.minSimilarity) || 0.6,
+      };
+
+      const isBaseReport = Boolean(baseRaw.assertionResults && baseRaw.metrics);
+      const isCandReport = Boolean(candRaw.assertionResults && candRaw.metrics);
+
+      let isRegression = false;
+      let renderedOutput = "";
+
+      if (isBaseReport && isCandReport) {
+        const reportDiff = TrajectoryComparator.compareReports(baseRaw, candRaw, undefined, undefined, compareOptions);
+        isRegression = reportDiff.isRegression;
+
+        if (options.format === "json") {
+          renderedOutput = JSON.stringify(reportDiff, null, 2);
+        } else {
+          // Render assertion diff
+          const lines: string[] = [];
+          lines.push(chalk.bold(`Report Comparison: ${reportDiff.scenarioId}`));
+          lines.push(`Status: Baseline Passed: ${reportDiff.baselinePassed} | Candidate Passed: ${reportDiff.candidatePassed}`);
+          lines.push(`Regression: ${reportDiff.isRegression ? chalk.red("YES") : chalk.green("NO")}`);
+          lines.push(chalk.bold("\nAssertion Breakdown:"));
+          for (const a of reportDiff.assertions) {
+            const badge = a.status === "regression" ? chalk.red(`[${a.status}]`) : chalk.green(`[${a.status}]`);
+            lines.push(`  • ${badge} ${a.type}: ${a.target} (base: ${a.baselinePassed}, cand: ${a.candidatePassed})`);
+          }
+          renderedOutput = lines.join("\n");
+        }
+      } else {
+        const diff = TrajectoryComparator.compare(baseRaw, candRaw, compareOptions);
+        isRegression = diff.regression.isRegression;
+        renderedOutput = renderTrajectoryDiff(diff, options.format as any);
+      }
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, renderedOutput, "utf8");
+        console.log(chalk.gray(`Diff report written to: ${options.output}`));
+      } else {
+        console.log(renderedOutput);
+      }
+
+      if (options.failOnRegression && isRegression) {
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Trajectory diff failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
+
 program.parse(process.argv);
