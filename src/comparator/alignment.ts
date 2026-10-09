@@ -1,4 +1,4 @@
-import { Trajectory, ToolCall } from '../core/types.js';
+import { Trajectory } from '../core/types.js';
 import { AlignedStep, StepAlignmentType, TrajectoryStepSummary } from './types.js';
 
 /**
@@ -69,7 +69,7 @@ export function calculateStepSimilarity(
   }
 
   // Base score for matching tool name
-  let score = 0.5;
+  let score = 0.35;
 
   // Compare arguments
   const argsA = a.arguments || {};
@@ -81,25 +81,38 @@ export function calculateStepSimilarity(
     const serializedA = JSON.stringify(argsA);
     const serializedB = JSON.stringify(argsB);
     if (serializedA === serializedB) {
-      score += 0.35;
+      score += 0.5;
     } else {
       const allKeys = new Set([...keysA, ...keysB]);
       const commonKeys = keysA.filter((k) => keysB.includes(k));
-      score += allKeys.size > 0 ? 0.2 * (commonKeys.length / allKeys.size) : 0.2;
+      score += allKeys.size > 0 ? 0.25 * (commonKeys.length / allKeys.size) : 0.1;
     }
   } else {
     // Lenient argument comparison
     const allKeys = new Set([...keysA, ...keysB]);
     if (allKeys.size === 0) {
-      score += 0.35;
+      score += 0.5;
     } else {
-      let matchingValues = 0;
+      let keyMatchingScore = 0;
       for (const k of allKeys) {
-        if (JSON.stringify(argsA[k]) === JSON.stringify(argsB[k])) {
-          matchingValues += 1;
+        if (k in argsA && k in argsB) {
+          const valA = argsA[k];
+          const valB = argsB[k];
+          if (JSON.stringify(valA) === JSON.stringify(valB)) {
+            keyMatchingScore += 1.0;
+          } else if (typeof valA === 'string' && typeof valB === 'string') {
+            const wordsA = new Set(valA.toLowerCase().split(/\s+/));
+            const wordsB = new Set(valB.toLowerCase().split(/\s+/));
+            const inter = [...wordsA].filter((w) => wordsB.has(w)).length;
+            const union = new Set([...wordsA, ...wordsB]).size;
+            const jaccard = union > 0 ? inter / union : 0;
+            keyMatchingScore += 0.1 + 0.9 * jaccard;
+          } else {
+            keyMatchingScore += 0.2;
+          }
         }
       }
-      score += 0.35 * (matchingValues / allKeys.size);
+      score += 0.5 * (keyMatchingScore / allKeys.size);
     }
   }
 
