@@ -4,6 +4,7 @@ import { WorkspaceManager } from "../sandbox/workspace.js";
 import { TrajectoryRecorder } from "../trajectory/recorder.js";
 import { MockToolRegistry } from "./registry.js";
 import { SteeringController } from "../steering/controller.js";
+import { ChaosEngine } from "../chaos/engine.js";
 
 export type NativeToolHandler = (
   args: Record<string, unknown>,
@@ -17,19 +18,22 @@ export class VirtualToolDispatcher {
   private recorder?: TrajectoryRecorder;
   private nativeTools: Map<string, NativeToolHandler> = new Map();
   private steering?: SteeringController;
+  private chaos?: ChaosEngine;
 
   constructor(
     mockRegistry: MockToolRegistry,
     executor: CommandExecutor,
     workspace: WorkspaceManager,
     recorder?: TrajectoryRecorder,
-    steering?: SteeringController
+    steering?: SteeringController,
+    chaos?: ChaosEngine
   ) {
     this.mockRegistry = mockRegistry;
     this.executor = executor;
     this.workspace = workspace;
     this.recorder = recorder;
     this.steering = steering;
+    this.chaos = chaos;
     this.registerBuiltinTools();
   }
 
@@ -40,6 +44,15 @@ export class VirtualToolDispatcher {
 
   public getSteeringController(): SteeringController | undefined {
     return this.steering;
+  }
+
+  public setChaosEngine(chaos: ChaosEngine): this {
+    this.chaos = chaos;
+    return this;
+  }
+
+  public getChaosEngine(): ChaosEngine | undefined {
+    return this.chaos;
   }
 
   private registerBuiltinTools(): void {
@@ -83,7 +96,28 @@ export class VirtualToolDispatcher {
     const callId = this.recorder?.notifyToolStart(toolName, args);
     let result: ToolCallResult;
 
-    // Steering interceptor hook
+    // 1. Chaos pre-interceptor hook
+    if (this.chaos) {
+      const chaosDecision = await this.chaos.interceptBefore(toolName, args);
+      if (chaosDecision && chaosDecision.outputOverride) {
+        result = chaosDecision.outputOverride;
+        const durationMs = Date.now() - startTime + (chaosDecision.latencyMs ?? 0);
+        if (this.recorder) {
+          this.recorder.recordToolCall(toolName, args, result, durationMs, callId);
+        }
+        this.chaos.recordToolResult(toolName, args, result);
+        if (this.steering) {
+          if (result.success) {
+            this.steering.recordSuccess();
+          } else {
+            this.steering.recordError();
+          }
+        }
+        return result;
+      }
+    }
+
+    // 2. Steering interceptor hook
     if (this.steering) {
       const decision = await this.steering.interceptTool(toolName, args);
       if (!decision.shouldExecuteNative) {
@@ -97,6 +131,9 @@ export class VirtualToolDispatcher {
         const durationMs = Date.now() - startTime;
         if (this.recorder) {
           this.recorder.recordToolCall(toolName, args, result, durationMs, callId);
+        }
+        if (this.chaos) {
+          this.chaos.recordToolResult(toolName, args, result);
         }
         if (result.success) {
           this.steering.recordSuccess();
@@ -127,6 +164,12 @@ export class VirtualToolDispatcher {
         error: `Tool "${toolName}" is not registered in mock registry or native toolset.`,
         exitCode: 127,
       };
+    }
+
+    // 3. Chaos post-interceptor hook (corruption, adversarial prompts)
+    if (this.chaos) {
+      result = await this.chaos.interceptAfter(toolName, args, result);
+      this.chaos.recordToolResult(toolName, args, result);
     }
 
     const durationMs = Date.now() - startTime;
