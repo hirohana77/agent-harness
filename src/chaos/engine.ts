@@ -7,7 +7,6 @@ import {
   ResilienceScorecard,
 } from "./types.js";
 import {
-  FaultInjector,
   LatencyInjector,
   ErrorInjector,
   CorruptionInjector,
@@ -34,6 +33,9 @@ export class ChaosEngine {
 
   // Active rule matched for the current in-flight tool call (for post interception)
   private inFlightMatches = new Map<string, ChaosRule>();
+
+  // Compiled regex cache for high performance rule evaluation
+  private regexCache = new Map<string, RegExp>();
 
   constructor(profileOrRules: ChaosProfile | ChaosRule[]) {
     if (Array.isArray(profileOrRules)) {
@@ -69,6 +71,17 @@ export class ChaosEngine {
   }
 
   /**
+   * Safely stringifies objects without circular reference crashes
+   */
+  private safeStringify(obj: unknown): string {
+    try {
+      return JSON.stringify(obj);
+    } catch {
+      return String(obj);
+    }
+  }
+
+  /**
    * Evaluates if a given rule matches the tool invocation context
    */
   private matchRule(
@@ -91,7 +104,11 @@ export class ChaosEngine {
       rule.targetTools.includes(toolName) ||
       rule.targetTools.some((pattern) => {
         if (pattern.includes("*")) {
-          const reg = new RegExp(`^${pattern.replace(/\*/g, ".*")}$`);
+          let reg = this.regexCache.get(`tool:${pattern}`);
+          if (!reg) {
+            reg = new RegExp(`^${pattern.replace(/\*/g, ".*")}$`);
+            this.regexCache.set(`tool:${pattern}`, reg);
+          }
           return reg.test(toolName);
         }
         return false;
@@ -105,12 +122,16 @@ export class ChaosEngine {
       if (rule.argPattern.field && args[rule.argPattern.field] !== undefined) {
         targetValue = String(args[rule.argPattern.field]);
       } else {
-        targetValue = JSON.stringify(args);
+        targetValue = this.safeStringify(args);
       }
 
       if (rule.argPattern.isRegex) {
         try {
-          const regex = new RegExp(rule.argPattern.pattern);
+          let regex = this.regexCache.get(`arg:${rule.argPattern.pattern}`);
+          if (!regex) {
+            regex = new RegExp(rule.argPattern.pattern);
+            this.regexCache.set(`arg:${rule.argPattern.pattern}`, regex);
+          }
           if (!regex.test(targetValue)) return false;
         } catch {
           return false;
@@ -146,112 +167,122 @@ export class ChaosEngine {
   }
 
   /**
-   * Pre-execution interception hook
+   * Pre-execution interception hook with error isolation boundary
    */
   public async interceptBefore(
     toolName: string,
     args: Record<string, unknown>
   ): Promise<ChaosInterceptorResult | null> {
-    this.callCounter++;
-    const currentCallIndex = this.callCounter;
+    try {
+      this.callCounter++;
+      const currentCallIndex = this.callCounter;
 
-    for (const rule of this.rules) {
-      if (this.matchRule(rule, toolName, args, currentCallIndex)) {
-        const context = { toolName, args, callIndex: currentCallIndex, rule };
-        let interceptResult: ChaosInterceptorResult | null = null;
+      for (const rule of this.rules) {
+        if (this.matchRule(rule, toolName, args, currentCallIndex)) {
+          const context = { toolName, args, callIndex: currentCallIndex, rule };
+          let interceptResult: ChaosInterceptorResult | null = null;
 
-        switch (rule.faultType) {
-          case "latency":
-            interceptResult = await this.latencyInjector.executePre(context);
-            break;
-          case "error":
-            interceptResult = this.errorInjector.executePre(context);
-            break;
-          case "rate_limit":
-            interceptResult = this.rateLimitInjector.executePre(context);
-            break;
-          case "output_corruption":
-          case "adversarial_prompt":
-            // Post-execution injectors: stash rule for post intercept
-            this.inFlightMatches.set(`${toolName}::${currentCallIndex}`, rule);
-            break;
-        }
+          switch (rule.faultType) {
+            case "latency":
+              interceptResult = await this.latencyInjector.executePre(context);
+              break;
+            case "error":
+              interceptResult = this.errorInjector.executePre(context);
+              break;
+            case "rate_limit":
+              interceptResult = this.rateLimitInjector.executePre(context);
+              break;
+            case "output_corruption":
+            case "adversarial_prompt":
+              // Post-execution injectors: stash rule for post intercept
+              this.inFlightMatches.set(`${toolName}::${currentCallIndex}`, rule);
+              break;
+          }
 
-        if (interceptResult && interceptResult.injected) {
-          const currentCount = (this.injectionCounts.get(rule.id) ?? 0) + 1;
-          this.injectionCounts.set(rule.id, currentCount);
+          if (interceptResult && interceptResult.injected) {
+            const currentCount = (this.injectionCounts.get(rule.id) ?? 0) + 1;
+            this.injectionCounts.set(rule.id, currentCount);
 
-          const event: ChaosEvent = {
-            id: `chaos-evt-${this.events.length + 1}`,
-            timestamp: Date.now(),
-            ruleId: rule.id,
-            faultType: rule.faultType,
-            toolName,
-            args,
-            callIndex: currentCallIndex,
-            details: {
-              ruleName: rule.name || rule.id,
-              outputOverride: interceptResult.outputOverride,
-              latencyMs: interceptResult.latencyMs,
-            },
-          };
-          this.events.push(event);
+            const event: ChaosEvent = {
+              id: `chaos-evt-${this.events.length + 1}`,
+              timestamp: Date.now(),
+              ruleId: rule.id,
+              faultType: rule.faultType,
+              toolName,
+              args,
+              callIndex: currentCallIndex,
+              details: {
+                ruleName: rule.name || rule.id,
+                outputOverride: interceptResult.outputOverride,
+                latencyMs: interceptResult.latencyMs,
+              },
+            };
+            this.events.push(event);
 
-          return interceptResult;
+            return interceptResult;
+          }
         }
       }
-    }
 
-    return null;
+      return null;
+    } catch (err: unknown) {
+      // Error isolation boundary: fail-safe back to normal operation
+      return null;
+    }
   }
 
   /**
-   * Post-execution interception hook
+   * Post-execution interception hook with error isolation boundary
    */
   public async interceptAfter(
     toolName: string,
     args: Record<string, unknown>,
     originalResult: ToolCallResult
   ): Promise<ToolCallResult> {
-    const currentCallIndex = this.callCounter;
-    const flightKey = `${toolName}::${currentCallIndex}`;
-    const rule = this.inFlightMatches.get(flightKey);
+    try {
+      const currentCallIndex = this.callCounter;
+      const flightKey = `${toolName}::${currentCallIndex}`;
+      const rule = this.inFlightMatches.get(flightKey);
 
-    if (!rule) {
+      if (!rule) {
+        return originalResult;
+      }
+
+      this.inFlightMatches.delete(flightKey);
+      const context = { toolName, args, callIndex: currentCallIndex, rule };
+      let modifiedResult = originalResult;
+
+      if (rule.faultType === "output_corruption") {
+        modifiedResult = this.corruptionInjector.executePost(context, originalResult);
+      } else if (rule.faultType === "adversarial_prompt") {
+        modifiedResult = this.adversarialInjector.executePost(context, originalResult);
+      }
+
+      // Record event
+      const currentCount = (this.injectionCounts.get(rule.id) ?? 0) + 1;
+      this.injectionCounts.set(rule.id, currentCount);
+
+      const event: ChaosEvent = {
+        id: `chaos-evt-${this.events.length + 1}`,
+        timestamp: Date.now(),
+        ruleId: rule.id,
+        faultType: rule.faultType,
+        toolName,
+        args,
+        callIndex: currentCallIndex,
+        details: {
+          ruleName: rule.name || rule.id,
+          marker: rule.faultConfig?.adversarial?.marker,
+          corruptionMode: rule.faultConfig?.corruption?.mode,
+        },
+      };
+      this.events.push(event);
+
+      return modifiedResult;
+    } catch {
+      // Error isolation: return unmodified original result if post-injector throws
       return originalResult;
     }
-
-    this.inFlightMatches.delete(flightKey);
-    const context = { toolName, args, callIndex: currentCallIndex, rule };
-    let modifiedResult = originalResult;
-
-    if (rule.faultType === "output_corruption") {
-      modifiedResult = this.corruptionInjector.executePost(context, originalResult);
-    } else if (rule.faultType === "adversarial_prompt") {
-      modifiedResult = this.adversarialInjector.executePost(context, originalResult);
-    }
-
-    // Record event
-    const currentCount = (this.injectionCounts.get(rule.id) ?? 0) + 1;
-    this.injectionCounts.set(rule.id, currentCount);
-
-    const event: ChaosEvent = {
-      id: `chaos-evt-${this.events.length + 1}`,
-      timestamp: Date.now(),
-      ruleId: rule.id,
-      faultType: rule.faultType,
-      toolName,
-      args,
-      callIndex: currentCallIndex,
-      details: {
-        ruleName: rule.name || rule.id,
-        marker: rule.faultConfig?.adversarial?.marker,
-        corruptionMode: rule.faultConfig?.corruption?.mode,
-      },
-    };
-    this.events.push(event);
-
-    return modifiedResult;
   }
 
   /**
@@ -300,6 +331,7 @@ export class ChaosEngine {
     this.agentTurns = [];
     this.callCounter = 0;
     this.inFlightMatches.clear();
+    this.regexCache.clear();
     this.rateLimitInjector.reset();
   }
 }

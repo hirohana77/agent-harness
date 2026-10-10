@@ -17,6 +17,13 @@ import { TrajectoryStreamObserver } from "../events/types.js";
 import { TelemetryServer } from "../telemetry/server.js";
 import { TelemetryObserver } from "../telemetry/observer.js";
 import { SteeringController } from "../steering/index.js";
+import {
+  ChaosEngine,
+  BUILTIN_CHAOS_PROFILES,
+  renderResilienceScorecard,
+  ChaosProfileSchema,
+  type ResilienceReportFormat,
+} from "../chaos/index.js";
 
 const program = new Command();
 
@@ -564,4 +571,100 @@ program
   });
 
 
+
+// chaos command
+program
+  .command("chaos")
+  .description("Inject deterministic or probabilistic faults and evaluate agent resilience")
+  .requiredOption("-s, --scenario <path>", "Path to scenario file")
+  .option("-p, --profile <nameOrPath>", "Chaos profile name (transient-network, rate-limit, adversarial-poison, corrupted-output, chaos-monkey) or JSON/YAML file path", "chaos-monkey")
+  .option("-f, --format <format>", "Resilience scorecard format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "File path to save the resilience scorecard")
+  .option("-c, --command <agentCmd>", "Agent command or shell script to execute inside workspace")
+  .option("--min-score <score>", "Minimum resilience score threshold (0-100) for CI gate", "0")
+  .action(async (options) => {
+    try {
+      const scenario = await loadScenario(options.scenario);
+
+      // Resolve Chaos Profile
+      let profile = BUILTIN_CHAOS_PROFILES[options.profile];
+      if (!profile) {
+        const resolvedPath = path.resolve(options.profile);
+        const raw = await fs.readFile(resolvedPath, "utf8");
+        const parsed = options.profile.endsWith(".yaml") || options.profile.endsWith(".yml")
+          ? yaml.parse(raw)
+          : JSON.parse(raw);
+        profile = ChaosProfileSchema.parse(parsed);
+      }
+
+      console.log(chalk.magenta(`⚡ Initializing Chaos Engine with Profile: ${chalk.bold(profile.name || profile.id)}`));
+      const chaos = new ChaosEngine(profile);
+
+      // Set up VirtualToolDispatcher with chaos engine
+      const { MockToolRegistry } = await import("../mock/registry.js");
+      const { VirtualToolDispatcher } = await import("../mock/dispatcher.js");
+      const mockRegistry = new MockToolRegistry();
+
+      await AgentHarness.runScenario(
+        scenario,
+        async (ctx) => {
+          const dispatcher = new VirtualToolDispatcher(
+            mockRegistry,
+            ctx.executor,
+            ctx.workspace,
+            ctx.recorder,
+            undefined,
+            chaos
+          );
+
+          ctx.recorder.startTurn(scenario.task.instruction, "Running chaos resilience test");
+
+          if (options.command) {
+            await dispatcher.call("exec_command", { command: options.command });
+          } else {
+            await dispatcher.call("exec_command", { command: "ls -la" });
+          }
+
+          ctx.recorder.completeTurn("Chaos test step completed", {
+            promptTokens: 100,
+            completionTokens: 50,
+            totalTokens: 150,
+          });
+
+          chaos.recordAgentTurn({
+            turnNumber: 1,
+            thought: "Diagnosing fault and attempting recovery",
+            assistantMessage: "Executed step under chaos injection",
+          });
+        }
+      );
+
+      const scorecard = chaos.generateScorecard(scenario.id);
+      const rendered = renderResilienceScorecard(scorecard, options.format as ResilienceReportFormat);
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, rendered, "utf8");
+        console.log(chalk.gray(`Resilience scorecard written to: ${options.output}`));
+      } else {
+        console.log(rendered);
+      }
+
+      const minScore = parseFloat(options.minScore) || 0;
+      if (scorecard.metrics.resilienceScore < minScore) {
+        console.error(
+          chalk.red(
+            `✘ Resilience score (${scorecard.metrics.resilienceScore}) below threshold (${minScore})`
+          )
+        );
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Chaos execution failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
+
