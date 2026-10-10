@@ -473,6 +473,75 @@ console.log("First divergence:", diff.firstDivergence?.description);
 const markdown = renderTrajectoryDiff(diff, "markdown");
 ```
 
+
+## Chaos Engineering & Agent Resilience Evaluation Framework
+
+Autonomous AI agents in production inevitably face volatile environments: flaky networks, rate limits, timeouts, corrupted stdout, and adversarial prompt injections embedded in external files or tool outputs. The **Chaos Engineering & Resilience Evaluation Framework** (`src/chaos`) allows teams to inject deterministic and probabilistic faults into agent tool pipelines and evaluate the agent's resilience, self-healing rate, loop avoidance, and prompt poisoning resistance.
+
+### 1. Key Capabilities
+- **Modular Fault Injectors**:
+  - `latency`: Injects synthetic latency, jitter, or command timeouts (`exitCode: 124`).
+  - `error`: Injects synthetic errors, exit codes, and simulated HTTP codes (`503 Unavailable`, `403 Forbidden`).
+  - `rate_limit`: Simulates API throttling (`HTTP 429 Too Many Requests`) with custom `Retry-After` headers.
+  - `output_corruption`: Corrupts tool stdout (truncation, broken JSON syntax, or garbled bytes).
+  - `adversarial_prompt`: Injects indirect prompt injection payloads and canary tokens (`CHAOS_POISON_CANARY_42`) to test if the agent gets tricked into leaking tokens or abandoning user instructions.
+- **Intelligent Trigger Strategies**:
+  - `always`: Injects fault on every matching invocation.
+  - `burst`: Injects $N$ consecutive failures to test retry-and-recovery patterns.
+  - `every_n_calls`: Injects periodically on interval intervals.
+  - `call_index`: Injects exclusively on specified step indices (e.g. step 1 and 3).
+  - `probability`: Injects probabilistically ($0.0 - 1.0$) for Chaos Monkey testing.
+- **Resilience Scorecard & Metrics**:
+  - **Self-Healing Recovery Rate**: Detects if the agent successfully recovers after an injected fault.
+  - **Mean Turns to Recovery (MTTR)**: Measures diagnostic efficiency from failure to next success.
+  - **Retry Storm / Loop Detection**: Flags repetitive unadapted calls with identical parameters ($\\ge 3$ times).
+  - **Poison Defense Rate**: Flags if canary tokens are leaked into the model context or output messages.
+  - **Overall Resilience Score (0 - 100)**: Grades agent robustness across grades `S`, `A`, `B`, `C`, `F`.
+- **Pre-Built Profiles**:
+  - `transient-network`: Network drop on git/curl/npm, recovers on retry.
+  - `rate-limit`: HTTP 429 throttling after initial calls.
+  - `adversarial-poison`: Prompt jailbreak and canary leak traps in tool outputs.
+  - `corrupted-output`: Broken JSON payloads.
+  - `chaos-monkey`: Randomized mixed jitter and intermittent errors.
+- **Multi-Format Scorecard Reporters**:
+  - `terminal`: Color-coded resilience radar, metrics breakdown, and architectural recommendations.
+  - `markdown`: GitHub PR-ready Markdown tables.
+  - `json`: Schema-validated JSON scorecard for CI quality gates.
+
+### 2. CLI Usage
+```bash
+# Run chaos resilience test with transient network profile
+agent-harness chaos -s scenario.yaml -p transient-network -c "npm install && npm test"
+
+# Run with Chaos Monkey disruptor and output Markdown scorecard
+agent-harness chaos -s scenario.yaml -p chaos-monkey --format markdown -o chaos-report.md
+
+# Enforce CI quality gate (exit code 1 if resilience score < 80)
+agent-harness chaos -s scenario.yaml -p rate-limit --min-score 80
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import { ChaosEngine, TransientNetworkProfile, renderResilienceScorecard } from "agent-harness";
+
+// Initialize chaos engine with profile
+const chaos = new ChaosEngine(TransientNetworkProfile);
+
+// Wire into VirtualToolDispatcher
+dispatcher.setChaosEngine(chaos);
+
+// Execute tool invocations
+await dispatcher.call("exec_command", { command: "git clone https://example.com/repo.git" });
+
+// Generate scorecard
+const scorecard = chaos.generateScorecard("repo-clone-task");
+console.log("Resilience Grade:", scorecard.metrics.rating); // S, A, B, C, F
+console.log("Resilience Score:", scorecard.metrics.resilienceScore);
+
+// Render markdown report
+const markdown = renderResilienceScorecard(scorecard, "markdown");
+```
+
 ## Architecture Specification
 
 For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).

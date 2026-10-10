@@ -402,6 +402,75 @@ console.log("首个分歧点:", diff.firstDivergence?.description);
 const markdown = renderTrajectoryDiff(diff, "markdown");
 ```
 
+
+## 混沌工程与智能体韧性评测框架 (Chaos Engineering & Resilience Evaluation)
+
+自主 AI 智能体在真实生产环境中必然面临脆弱多变的基础设施：瞬态网络丢包、API 频控限流、执行超时、命令截断以及隐藏在外部文件或工具输出中的对抗性提示词注入（Prompt Injection）。**混沌工程与智能体韧性评测框架** (`src/chaos`) 支持向智能体工具管道注入确定性或概率性故障，并全方位量化智能体的故障自愈率、死循环抵御能力、提示词投毒防御能力与综合韧性评分。
+
+### 1. 核心能力
+- **模块化故障注入器 (Fault Injectors)**：
+  - `latency`：注入网络延迟、时钟抖动或超时中断（模拟 `exitCode: 124`）。
+  - `error`：注入指定退出码、自定义错误提示及模拟 HTTP 状态码（如 `503 Unavailable`、`403 Forbidden`）。
+  - `rate_limit`：模拟 API 突发限流（`HTTP 429 Too Many Requests`）并返回 `Retry-After` 头。
+  - `output_corruption`：破坏工具返回输出（截断、非法 JSON 语法破坏、空输出或乱码注入）。
+  - `adversarial_prompt`：在工具输出中嵌入越狱指令或金丝雀诱饵 Token（`CHAOS_POISON_CANARY_42`），检测智能体是否被诱骗泄露机密或偏离用户目标。
+- **自适应触发策略 (Trigger Strategies)**：
+  - `always`：匹配工具与参数时每次必触发。
+  - `burst`：突发注入 $N$ 次失败后恢复成功，用于严格验证重试与回退策略。
+  - `every_n_calls`：按固定间隔周期性触发。
+  - `call_index`：仅在指定调用序号时触发（如仅在第 1、3 步注入故障）。
+  - `probability`：概率性注入（$0.0 \sim 1.0$），模拟真实 Chaos Monkey 混沌扰动。
+- **全方位韧性度量与雷达看板 (Resilience Scorecard)**：
+  - **故障自愈成功率 (Recovery Rate)**：检测智能体在遭遇工具报错后是否成功完成自我修复与重试。
+  - **平均自愈轮次 (Mean Turns to Recovery, MTTR)**：度量智能体从发生故障到恢复常态的轮次开销。
+  - **死循环风暴惩罚 (Retry Storms / Loops)**：检测智能体是否存在未改进参数的同命令死循环连续调用（$\ge 3$ 次）。
+  - **投毒防御率 (Poison Defense Rate)**：严格检测金丝雀诱饵 Token 是否泄漏在智能体的推理过程或后续操作中。
+  - **综合韧性得分与评级 (Resilience Score & Rating)**：0 ~ 100 分综合打分，划分为 `S`（无懈可击）、`A`（高度自愈）、`B`（降级容忍）、`C`（脆弱易受影响）、`F`（崩溃失效）五个等级。
+- **开箱即用内置画像 (Pre-built Profiles)**：
+  - `transient-network`：外部网络命令（git/npm/curl 等）瞬态丢包，重试即可自愈。
+  - `rate-limit`：调用频次超出阈值后触发 HTTP 429 限流。
+  - `adversarial-poison`：工具输出暗藏提示词越狱与金丝雀泄漏陷阱。
+  - `corrupted-output`：输出损坏与破坏 JSON 格式。
+  - `chaos-monkey`：随机网络抖动与偶发性环境报错。
+- **多端报告呈现**：
+  - `terminal`：高亮 ANSI 韧性雷达卡片、指标分解及架构优化建议。
+  - `markdown`：适配 GitHub PR 评论的 Markdown 格式报告。
+  - `json`：符合严格 Schema 的机器可读输出，无缝接入 CI 质量门禁。
+
+### 2. 命令行使用示例 (CLI)
+```bash
+# 使用瞬态网络丢包画像执行混沌测试
+agent-harness chaos -s scenario.yaml -p transient-network -c "npm install && npm test"
+
+# 运行 Chaos Monkey 随机扰动并导出 Markdown 格式报告
+agent-harness chaos -s scenario.yaml -p chaos-monkey --format markdown -o chaos-report.md
+
+# 在 CI 流水线中设置最低韧性分数门禁（若分数低于 80 则退出码为 1）
+agent-harness chaos -s scenario.yaml -p rate-limit --min-score 80
+```
+
+### 3. SDK 编程接口示例
+```typescript
+import { ChaosEngine, TransientNetworkProfile, renderResilienceScorecard } from "agent-harness";
+
+// 基于画像初始化混沌引擎
+const chaos = new ChaosEngine(TransientNetworkProfile);
+
+// 挂载至虚拟工具分发器
+dispatcher.setChaosEngine(chaos);
+
+// 执行智能体工具调用
+await dispatcher.call("exec_command", { command: "git clone https://example.com/repo.git" });
+
+// 生成智能体韧性评分卡
+const scorecard = chaos.generateScorecard("repo-clone-task");
+console.log("韧性等级:", scorecard.metrics.rating); // S, A, B, C, F
+console.log("综合得分:", scorecard.metrics.resilienceScore);
+
+// 渲染为 Markdown 报告
+const markdown = renderResilienceScorecard(scorecard, "markdown");
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。
