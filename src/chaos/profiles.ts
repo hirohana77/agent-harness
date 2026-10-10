@@ -48,7 +48,7 @@ export const RateLimitStormProfile: ChaosProfile = {
       faultType: "rate_limit",
       faultConfig: {
         rateLimit: {
-          quotaLimit: 2,
+          quotaLimit: 1,
           retryAfterMs: 500,
           statusCode: 429,
         },
