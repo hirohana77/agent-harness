@@ -471,6 +471,70 @@ console.log("综合得分:", scorecard.metrics.resilienceScore);
 const markdown = renderResilienceScorecard(scorecard, "markdown");
 ```
 
+
+## 多轨迹集群共识比对与黄金路径挖掘引擎 (Cluster Consensus & Route Mining Engine)
+
+在现代 AI 智能体评测与集成系统（如 Best-of-N 采样、Self-Consistency 多数投票、SWE-bench 多并行 Rollout 以及多智能体辩论）中，开发者通常会针对同一任务并行执行 $N$ 次独立轨迹。**多轨迹集群共识比对引擎** (`src/consensus`) 实现了渐进式多序列比对（Multi-Sequence Alignment, MSA），跨 $N$ 条轨迹进行全局步骤对齐，量化集群一致性与路径熵，自动发现不变瓶颈节点与死循环陷阱，并提炼合成出最优的**规范黄金轨迹 (Canonical Golden Trajectory)**。
+
+### 1. 核心能力
+- **渐进式多序列比对 (Progressive MSA)**：
+  - 基于 Needleman-Wunsch 与 Profile 对齐算法，对离散工具调用、轮次终止与执行结果进行 $N$ 路全局时序对齐。
+  - 容忍智能体的探索性试探命令与偶发分歧，避免全局时序错位。
+- **共识层级与一致性打分**：
+  - `invariant`（不变步骤）：100% 运行均执行的关键瓶颈。
+  - `majority`（多数步骤）：>50% 运行达成共识的有效步骤。
+  - `minority`（少数步骤）：$\le 50\%$ 运行执行的分支路径。
+  - `outlier`（离群步骤）：仅单次运行出现的偶发尝试或幻觉调用。
+- **关键节点与死区陷阱挖掘**：
+  - **不变瓶颈节点 (Invariant Bottlenecks)**：成功运行必须经历的关键检查点，计算与成功的相关系数 ($r \in [-1, 1]$)。
+  - **死循环与失败陷阱 (Dead-End Traps)**：集中导致智能体报错、超时或违规的死亡分支。
+- **路径多样性与香农熵 (Path Diversity & Shannon Entropy)**：
+  - 量化决策方差：低熵表示高度确定性解题，高熵揭示广泛的随机探索或决策漂移。
+- **规范黄金轨迹合成与提炼 (Canonical Golden Trajectory Synthesis)**：
+  - 自动剔除单次运行的离群试探与重复死循环，聚合高置信度共识步骤，重构为可执行的黄金轨迹。
+- **多端报告呈现**：
+  - `terminal`：高亮 ANSI ASCII 对齐矩阵、检查点勋章与共识雷达看板。
+  - `markdown`：适配 GitHub PR 评论的 Markdown 格式报告。
+  - `json`：机器可读的完整 MSA 矩阵与集群统计数据，便于接入自动化评测流水线。
+
+### 2. 命令行使用示例 (CLI)
+```bash
+# 比对指定的多条轨迹 JSON
+agent-harness consensus -t ./runs/run-1.json ./runs/run-2.json ./runs/run-3.json
+
+# 分析目录下所有轨迹，生成 Markdown 报告并导出提炼的黄金轨迹
+agent-harness consensus -t ./runs/ --format markdown -o consensus-report.md -s golden-trajectory.json
+
+# 在 CI 流水线中设定最低共识分数门禁（低于 80 分则退出码为 1）
+agent-harness consensus -t ./runs/ --min-score 80
+```
+
+### 3. SDK 编程接口示例
+```typescript
+import {
+  ClusterConsensusEngine,
+  renderConsensusReport,
+  type Trajectory,
+} from "agent-harness";
+
+// 加载轨迹集合
+const rollouts: Trajectory[] = [/* run1, run2, run3 */];
+
+// 执行集群共识比对分析
+const result = ClusterConsensusEngine.analyzeCluster(rollouts, {
+  bottleneckThreshold: 0.8,
+  minAgreementRate: 0.5,
+});
+
+console.log("集群共识得分:", result.metrics.overallAgreementScore);
+console.log("路径多样性香农熵:", result.metrics.pathDiversityEntropy);
+console.log("关键检查点数量:", result.bottlenecks.length);
+console.log("黄金轨迹步骤数:", result.canonicalTrajectory.totalSteps);
+
+// 渲染 Markdown 报告
+const report = renderConsensusReport(result, "markdown");
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。

@@ -542,6 +542,70 @@ console.log("Resilience Score:", scorecard.metrics.resilienceScore);
 const markdown = renderResilienceScorecard(scorecard, "markdown");
 ```
 
+
+## Cluster Trajectory Consensus & Route Mining Engine
+
+In modern AI agent evaluation and ensemble systems (e.g., Best-of-N sampling, Self-Consistency, SWE-bench rollouts, and multi-agent debates), developers run $N$ parallel rollouts for the same task. The **Cluster Trajectory Consensus Engine** (`src/consensus`) performs progressive Multi-Sequence Alignment (MSA) across $N$ trajectories ($N \ge 2$), quantifies cross-run determinism, identifies critical bottlenecks and failure traps, and synthesizes the optimal **Canonical Golden Trajectory**.
+
+### 1. Key Capabilities
+- **Progressive Multi-Sequence Alignment (MSA)**:
+  - Aligns discrete tool calls, turn completions, arguments, and outcomes across $N$ independent runs into a global consensus timeline.
+  - Accommodates exploratory probes and divergent retries without cascading misalignments.
+- **Consensus Step Categorization & Agreement Metrics**:
+  - `invariant`: Steps executed by 100% of runs in the cluster (indispensable checkpoints).
+  - `majority`: Steps agreed upon by >50% of runs.
+  - `minority`: Steps shared by $\le 50\%$ of runs.
+  - `outlier`: Single-run deviations, exploratory probes, or hallucinations.
+- **Critical Node & Trap Discovery**:
+  - **Invariant Bottlenecks**: Critical checkpoints passed by successful runs, computing success correlation ($r \in [-1, 1]$).
+  - **Dead-End Failure Traps**: Branch points correlated with agent failure and policy violations.
+- **Path Diversity & Shannon Entropy**:
+  - Measures decision variance: low entropy indicates high determinism, while high entropy highlights exploratory branching.
+- **Canonical Golden Trajectory Synthesis**:
+  - Distills a minimal, optimal golden trajectory by pruning outliers, deduplicating repetitive loops, and packing high-confidence steps into executable turns.
+- **Multi-Format Reporting**:
+  - `terminal`: Color-coded ASCII timeline matrix, bottleneck markers, and consensus radar.
+  - `markdown`: GitHub PR-ready tables for CI/CD audit logs.
+  - `json`: Full MSA matrix and metadata for automated downstream analysis.
+
+### 2. CLI Usage
+```bash
+# Analyze consensus across trajectory rollouts
+agent-harness consensus -t ./runs/run-1.json ./runs/run-2.json ./runs/run-3.json
+
+# Analyze all trajectory JSONs in directory, export Markdown report and synthesized Golden Path
+agent-harness consensus -t ./runs/ --format markdown -o consensus-report.md -s golden-trajectory.json
+
+# Enforce consensus agreement CI gate (fail if consensus score < 80)
+agent-harness consensus -t ./runs/ --min-score 80
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  ClusterConsensusEngine,
+  renderConsensusReport,
+  type Trajectory,
+} from "agent-harness";
+
+// Load rollouts
+const rollouts: Trajectory[] = [/* run1, run2, run3 */];
+
+// Run cluster consensus analysis
+const result = ClusterConsensusEngine.analyzeCluster(rollouts, {
+  bottleneckThreshold: 0.8,
+  minAgreementRate: 0.5,
+});
+
+console.log("Overall Consensus Score:", result.metrics.overallAgreementScore);
+console.log("Shannon Entropy:", result.metrics.pathDiversityEntropy);
+console.log("Bottlenecks Found:", result.bottlenecks.length);
+console.log("Golden Path Steps:", result.canonicalTrajectory.totalSteps);
+
+// Render Markdown or Terminal report
+const report = renderConsensusReport(result, "markdown");
+```
+
 ## Architecture Specification
 
 For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).
