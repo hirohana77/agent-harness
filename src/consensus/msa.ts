@@ -91,6 +91,7 @@ function alignSequenceToProfile(
   }
 
   const GAP_PENALTY = options.gapPenalty ?? -0.5;
+  const MISMATCH_PENALTY = -2.5;
 
   // DP table for aligning profile cols (0..numProfileCols) and seq steps (0..numSeqSteps)
   const dp: number[][] = Array.from({ length: numProfileCols + 1 }, () =>
@@ -125,7 +126,7 @@ function alignSequenceToProfile(
   for (let i = 1; i <= numProfileCols; i++) {
     for (let j = 1; j <= numSeqSteps; j++) {
       const sim = simMatrix[i - 1][j - 1];
-      const matchScore = sim >= options.similarityThreshold ? sim * 2.0 : -1.0;
+      const matchScore = sim >= options.similarityThreshold ? sim * 2.0 : MISMATCH_PENALTY;
       dp[i][j] = Math.max(
         dp[i - 1][j - 1] + matchScore,
         dp[i - 1][j] + GAP_PENALTY,
@@ -144,8 +145,11 @@ function alignSequenceToProfile(
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0) {
       const sim = simMatrix[i - 1][j - 1];
-      const matchScore = sim >= options.similarityThreshold ? sim * 2.0 : -1.0;
-      if (Math.abs(dp[i][j] - (dp[i - 1][j - 1] + matchScore)) < 1e-6) {
+      const matchScore = sim >= options.similarityThreshold ? sim * 2.0 : MISMATCH_PENALTY;
+      if (
+        sim >= options.similarityThreshold &&
+        Math.abs(dp[i][j] - (dp[i - 1][j - 1] + matchScore)) < 1e-6
+      ) {
         const existingCol = profile[i - 1];
         const step = seq.steps[j - 1];
         newProfile.unshift([
