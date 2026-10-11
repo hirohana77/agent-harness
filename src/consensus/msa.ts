@@ -23,6 +23,43 @@ interface ProfileSlot {
 type Profile = ProfileSlot[][]; // columns: ProfileSlot[] where each element is an array of slots for each trajectory
 
 /**
+ * In-memory LRU-like cache for pairwise step similarity calculations to avoid repeated JSON serialization.
+ */
+class StepSimilarityCache {
+  private cache = new Map<string, number>();
+  private readonly maxSize = 10000;
+
+  public get(a: TrajectoryStepSummary, b: TrajectoryStepSummary, strictArgs: boolean): number | undefined {
+    const key = `${a.stepIndex}:${a.toolName ?? a.stepType}|${b.stepIndex}:${b.toolName ?? b.stepType}|${strictArgs}`;
+    return this.cache.get(key);
+  }
+
+  public set(a: TrajectoryStepSummary, b: TrajectoryStepSummary, strictArgs: boolean, val: number): void {
+    if (this.cache.size >= this.maxSize) {
+      // Evict oldest entries
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+    const key = `${a.stepIndex}:${a.toolName ?? a.stepType}|${b.stepIndex}:${b.toolName ?? b.stepType}|${strictArgs}`;
+    this.cache.set(key, val);
+  }
+}
+
+const similarityCache = new StepSimilarityCache();
+
+function getCachedStepSimilarity(
+  a: TrajectoryStepSummary,
+  b: TrajectoryStepSummary,
+  strictArgs: boolean
+): number {
+  const cached = similarityCache.get(a, b, strictArgs);
+  if (cached !== undefined) return cached;
+  const score = calculateStepSimilarity(a, b, strictArgs);
+  similarityCache.set(a, b, strictArgs, score);
+  return score;
+}
+
+/**
  * Computes pairwise alignment similarity between two sequences of steps.
  */
 function computePairwiseScore(
@@ -42,7 +79,7 @@ function computePairwiseScore(
     const start = Math.max(0, i - 3);
     const end = Math.min(lenB, i + 4);
     for (let j = start; j < end; j++) {
-      const sim = calculateStepSimilarity(seqA[i], seqB[j], strictArgs);
+      const sim = getCachedStepSimilarity(seqA[i], seqB[j], strictArgs);
       if (sim > best) best = sim;
     }
     if (best > 0) {
@@ -115,7 +152,7 @@ function alignSequenceToProfile(
       } else {
         const avgSim =
           nonGapSteps.reduce(
-            (sum, pStep) => sum + calculateStepSimilarity(pStep, seq.steps[j], options.strictArgs),
+            (sum, pStep) => sum + getCachedStepSimilarity(pStep, seq.steps[j], options.strictArgs),
             0
           ) / nonGapSteps.length;
         simMatrix[i][j] = avgSim;
@@ -350,7 +387,7 @@ export function alignMultipleTrajectories(
     if (dominantStep) {
       for (const slot of activeSlots) {
         if (slot.step) {
-          const sim = calculateStepSimilarity(dominantStep, slot.step, options.strictArgs);
+          const sim = getCachedStepSimilarity(dominantStep, slot.step, options.strictArgs);
           if (sim >= options.similarityThreshold) {
             matchingCount++;
           }

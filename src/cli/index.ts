@@ -25,6 +25,12 @@ import {
   type ResilienceReportFormat,
 } from "../chaos/index.js";
 
+import {
+  ClusterConsensusEngine,
+  renderConsensusReport,
+  type ConsensusReportFormat,
+} from "../consensus/index.js";
+
 const program = new Command();
 
 program
@@ -662,6 +668,79 @@ program
       }
     } catch (err: any) {
       console.error(chalk.red("✘ Chaos execution failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
+
+// consensus command
+program
+  .command("consensus")
+  .description("Analyze cluster consensus across N trajectory rollouts, detect bottlenecks, and distill canonical golden path")
+  .requiredOption("-t, --trajectories <paths...>", "Paths to trajectory JSON files or directories")
+  .option("-f, --format <format>", "Consensus scorecard format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "File path to save the consensus report")
+  .option("-s, --synthesize <path>", "File path to export the synthesized canonical trajectory JSON")
+  .option("--min-score <score>", "Minimum overall consensus score threshold (0-100) for CI gate", "0")
+  .action(async (options) => {
+    try {
+      const filePaths = [];
+      for (const p of options.trajectories) {
+        const resolved = path.resolve(p);
+        const stat = await fs.stat(resolved);
+        if (stat.isDirectory()) {
+          const files = await fs.readdir(resolved);
+          for (const f of files) {
+            if (f.endsWith(".json")) {
+              filePaths.push(path.join(resolved, f));
+            }
+          }
+        } else {
+          filePaths.push(resolved);
+        }
+      }
+
+      if (filePaths.length === 0) {
+        console.error(chalk.red("✘ No trajectory JSON files found."));
+        process.exit(1);
+      }
+
+      const trajectories = [];
+      for (const fp of filePaths) {
+        const raw = await fs.readFile(fp, "utf8");
+        trajectories.push(JSON.parse(raw));
+      }
+
+      const result = ClusterConsensusEngine.analyzeCluster(trajectories);
+      const rendered = renderConsensusReport(result, options.format as ConsensusReportFormat);
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, rendered, "utf8");
+        console.log(chalk.gray(`Consensus report written to: ${options.output}`));
+      } else {
+        console.log(rendered);
+      }
+
+      if (options.synthesize) {
+        const synthPath = path.resolve(options.synthesize);
+        await fs.mkdir(path.dirname(synthPath), { recursive: true });
+        await fs.writeFile(synthPath, JSON.stringify(result.canonicalTrajectory, null, 2), "utf8");
+        console.log(chalk.green(`✔ Synthesized canonical trajectory written to: ${options.synthesize}`));
+      }
+
+      const minScore = parseFloat(options.minScore) || 0;
+      if (result.metrics.overallAgreementScore < minScore) {
+        console.error(
+          chalk.red(
+            `✘ Cluster consensus score (${result.metrics.overallAgreementScore}) below threshold (${minScore})`
+          )
+        );
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Cluster consensus analysis failed:"), err.message);
       process.exit(1);
     }
   });
