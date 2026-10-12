@@ -47,3 +47,4 @@ export * from './comparator/schemas.js';
 export * from './comparator/index.js';
 export * from './chaos/index.js';
 export * from './consensus/index.js';
+export * from './distillation/index.js';
