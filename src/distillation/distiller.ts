@@ -447,6 +447,29 @@ export class PolicyDistiller {
       tokenEstimate = this.estimateTokenCount(currentTurns);
     }
 
+    // If still over budget, aggressively compress thoughts and tool results
+    if (tokenEstimate > tokenBudget) {
+      isPruned = true;
+      currentTurns = currentTurns.map((t) => ({
+        ...t,
+        thought: t.thought ? t.thought.slice(0, 40) + '...' : undefined,
+        toolCalls: t.toolCalls?.map((c) => ({
+          ...c,
+          result:
+            typeof c.result === 'object' && c.result !== null
+              ? {
+                  ...(c.result as any),
+                  output:
+                    typeof (c.result as any).output === 'string'
+                      ? (c.result as any).output.slice(0, 50) + '...'
+                      : (c.result as any).output,
+                }
+              : c.result,
+        })),
+      }));
+      tokenEstimate = this.estimateTokenCount(currentTurns);
+    }
+
     // Re-index remaining turns
     currentTurns = currentTurns.map((t, idx) => ({
       ...t,
