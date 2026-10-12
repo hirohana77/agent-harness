@@ -4,3 +4,4 @@ export { PolicyDistiller } from './distiller.js';
 export { DynamicGuidanceDispatcher } from './dispatcher.js';
 export { PromptGuidanceFormatter } from './formatters.js';
 export { PolicyDistillationEngine } from './engine.js';
+export * from './reporters/index.js';

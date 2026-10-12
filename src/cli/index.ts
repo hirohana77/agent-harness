@@ -31,6 +31,13 @@ import {
   type ConsensusReportFormat,
 } from "../consensus/index.js";
 
+import {
+  PolicyDistillationEngine,
+  renderDistillationReport,
+  PromptGuidanceFormatter,
+  type DistillationReportFormat,
+} from "../distillation/index.js";
+
 const program = new Command();
 
 program
@@ -741,6 +748,75 @@ program
       }
     } catch (err: any) {
       console.error(chalk.red("✘ Cluster consensus analysis failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
+// distill command
+program
+  .command("distill")
+  .description("Distill strategic execution policies, invariant milestones, and anti-pattern guidance from trajectories or consensus clusters")
+  .requiredOption("-i, --input <path>", "Path to consensus JSON, canonical trajectory JSON, or raw trajectory JSON")
+  .option("-f, --format <format>", "Guidance format: terminal, markdown, json, fewshot, steering", "terminal")
+  .option("-o, --output <path>", "File path to save the distilled policy report")
+  .option("-b, --token-budget <tokens>", "Maximum token budget for exemplar steps", "1500")
+  .option("-t, --target <model>", "Target model prompt format: generic, openai, anthropic, markdown", "generic")
+  .option("--export-steering <path>", "File path to export generated steering rules JSON")
+  .option("--no-negative", "Disable negative anti-pattern guidance extraction")
+  .option("--no-compression", "Disable compression of repetitive steps")
+  .action(async (options) => {
+    try {
+      const resolved = path.resolve(options.input);
+      const raw = await fs.readFile(resolved, "utf8");
+      const parsed = JSON.parse(raw);
+
+      const tokenBudget = parseInt(options.tokenBudget, 10) || 1500;
+      const includeNegativeGuidance = options.negative !== false;
+      const compressRedundantSteps = options.compression !== false;
+
+      const engine = new PolicyDistillationEngine({
+        tokenBudget,
+        includeNegativeGuidance,
+        compressRedundantSteps,
+        targetModelFormat: options.target as any,
+      });
+
+      let policy;
+      if (parsed.metrics && parsed.canonicalTrajectory) {
+        policy = engine.distillFromConsensus(parsed);
+      } else if (parsed.synthesizedFromCount !== undefined && parsed.turns) {
+        policy = engine.distillFromCanonical(parsed);
+      } else {
+        policy = engine.distillFromTrajectory(parsed);
+      }
+
+      let rendered: string;
+      if (options.format === "fewshot") {
+        rendered = JSON.stringify(PromptGuidanceFormatter.formatAsOpenAI(policy), null, 2);
+      } else if (options.format === "steering") {
+        rendered = JSON.stringify(PromptGuidanceFormatter.formatAsSteeringConfig(policy), null, 2);
+      } else {
+        rendered = renderDistillationReport(policy, options.format as DistillationReportFormat);
+      }
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, rendered, "utf8");
+        console.log(chalk.gray(`Distilled policy guidance written to: ${options.output}`));
+      } else {
+        console.log(rendered);
+      }
+
+      if (options.exportSteering) {
+        const steerPath = path.resolve(options.exportSteering);
+        await fs.mkdir(path.dirname(steerPath), { recursive: true });
+        const config = PromptGuidanceFormatter.formatAsSteeringConfig(policy);
+        await fs.writeFile(steerPath, JSON.stringify(config, null, 2), "utf8");
+        console.log(chalk.green(`✔ Steering rules exported to: ${options.exportSteering}`));
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Policy distillation failed:"), err.message);
       process.exit(1);
     }
   });

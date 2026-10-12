@@ -13,6 +13,7 @@ export class DynamicGuidanceDispatcher {
   private state: GuidanceState;
   private consecutiveNonMilestoneSteps: number = 0;
   private maxDivergenceTolerance: number = 3;
+  private regexCache: Map<string, RegExp | null> = new Map();
 
   constructor(policy: DistilledPolicy, maxDivergenceTolerance: number = 3) {
     this.policy = policy;
@@ -148,19 +149,53 @@ export class DynamicGuidanceDispatcher {
     return this.policy.milestones[this.state.currentMilestoneIndex];
   }
 
+  private safeSerializeArgs(args: Record<string, unknown> | undefined): string {
+    if (!args) return '';
+    try {
+      return JSON.stringify(args);
+    } catch {
+      // Circular reference or non-serializable object fallback
+      try {
+        return Object.entries(args)
+          .map(([k, v]) => `${k}:${String(v)}`)
+          .join(',');
+      } catch {
+        return '';
+      }
+    }
+  }
+
+  private getCachedRegex(pattern: string): RegExp | null {
+    if (this.regexCache.has(pattern)) {
+      return this.regexCache.get(pattern) || null;
+    }
+    try {
+      const reg = new RegExp(pattern, 'i');
+      this.regexCache.set(pattern, reg);
+      return reg;
+    } catch {
+      this.regexCache.set(pattern, null);
+      return null;
+    }
+  }
+
   private findMatchingAntiPattern(
     context: StepEvaluationContext
   ): NegativePatternGuidance | undefined {
+    const targetTool = (context.toolName || '').toLowerCase();
+
     for (const trap of this.policy.antiPatterns) {
       // 1. Tool name match
-      if (trap.triggerTool.toLowerCase() !== context.toolName.toLowerCase()) {
+      if (trap.triggerTool.toLowerCase() !== targetTool) {
         continue;
       }
 
       // 2. Argument pattern match (if specified)
       if (trap.argumentPattern) {
-        const rawArgs = JSON.stringify(context.arguments || {});
-        if (!rawArgs.includes(trap.argumentPattern)) {
+        const rawArgs = this.safeSerializeArgs(context.arguments);
+        const reg = this.getCachedRegex(trap.argumentPattern);
+        const matches = reg ? reg.test(rawArgs) : rawArgs.includes(trap.argumentPattern);
+        if (!matches) {
           continue;
         }
       }
@@ -168,9 +203,10 @@ export class DynamicGuidanceDispatcher {
       // 3. Error keyword match in previousResult
       if (trap.errorKeywords && trap.errorKeywords.length > 0 && context.previousResult) {
         const errText = `${context.previousResult.error || ''} ${context.previousResult.output || ''}`.toLowerCase();
-        const matchedKw = trap.errorKeywords.some((kw) =>
-          errText.includes(kw.toLowerCase())
-        );
+        const matchedKw = trap.errorKeywords.some((kw) => {
+          const kwReg = this.getCachedRegex(kw);
+          return kwReg ? kwReg.test(errText) : errText.includes(kw.toLowerCase());
+        });
         if (!matchedKw) {
           continue;
         }
@@ -189,13 +225,16 @@ export class DynamicGuidanceDispatcher {
       return false;
     }
 
-    if (milestone.targetTool.toLowerCase() !== context.toolName.toLowerCase()) {
+    const currentTool = (context.toolName || '').toLowerCase();
+    if (milestone.targetTool.toLowerCase() !== currentTool) {
       return false;
     }
 
     if (milestone.argumentPattern) {
-      const rawArgs = JSON.stringify(context.arguments || {});
-      if (!rawArgs.includes(milestone.argumentPattern)) {
+      const rawArgs = this.safeSerializeArgs(context.arguments);
+      const reg = this.getCachedRegex(milestone.argumentPattern);
+      const matches = reg ? reg.test(rawArgs) : rawArgs.includes(milestone.argumentPattern);
+      if (!matches) {
         return false;
       }
     }
