@@ -606,6 +606,78 @@ console.log("Golden Path Steps:", result.canonicalTrajectory.totalSteps);
 const report = renderConsensusReport(result, "markdown");
 ```
 
+## Trajectory Policy Distillation & Dynamic Guidance Engine
+
+Once high-quality trajectories or consensus clusters have synthesized a **Canonical Golden Trajectory** and identified hazardous **Dead-End Traps**, the **Policy Distillation & Dynamic Guidance Engine** (`src/distillation`) completes the autonomous agent self-improvement flywheel. It distills actionable execution policies, invariant milestone roadmaps, negative anti-pattern constraints, and token-budget-aware few-shot exemplars, dynamically steering subsequent agent runs at runtime to prevent recurring pitfalls and accelerate task convergence.
+
+### 1. Key Capabilities
+- **Policy Distillation from Multi-Source Inputs**:
+  - Distills structured guidance from `ClusterConsensusResult`, `CanonicalTrajectory`, or single raw `Trajectory`.
+  - Automatically identifies invariant checkpoints as positive milestones with importance levels (`critical`, `recommended`).
+  - Converts dead-end traps and high-frequency error patterns into negative anti-pattern rules (`NegativePatternGuidance`) with remedy suggestions.
+- **Token-Budget-Aware Exemplar Compression**:
+  - Compresses redundant repetitive turns (e.g. repeated directory scans or redundant tool calls).
+  - Enforces strict token budgets (e.g. 500, 1500 tokens) via intelligent middle-turn pruning and thought/output summarization while preserving critical start/end milestones.
+- **Dynamic Guidance Dispatcher**:
+  - Tracks real-time agent execution turns using an internal state machine (`tracking`, `milestones_complete`, `diverged`, `blocked`).
+  - Emits real-time dynamic feedback (`hint`, `warn`, `block`, `milestone_advance`, `diverged`).
+  - Intercepts dangerous actions matching anti-patterns with actionable remediation hints before execution.
+- **Seamless Steering Controller Blueprints**:
+  - Auto-synthesizes dynamic breakpoint and intervention rules ready for `SteeringController` injection (`override_tool`, `inject_prompt`).
+- **Multi-Target Formats & Exporters**:
+  - `markdown`: Formats into a system prompt section (`# Strategic Execution Guidance & Proven Milestones`).
+  - `anthropic`: XML-tagged prompt structure (`<distilled_guidance>...</distilled_guidance>`).
+  - `fewshot`: OpenAI-compatible `ChatCompletionMessageParam` array with structured tool calls.
+  - `steering`: JSON breakpoint rules ready for runtime execution steering.
+  - `terminal` & `markdown`: Visual scorecard reports.
+
+### 2. CLI Usage
+```bash
+# Distill strategic policy and display ANSI terminal summary
+agent-harness distill -i ./runs/consensus-result.json
+
+# Distill guidance into Markdown format and export steering rules
+agent-harness distill -i ./runs/canonical.json -f markdown -o policy-guidance.md --export-steering ./steering-rules.json
+
+# Export OpenAI few-shot messages with 1000-token budget limit
+agent-harness distill -i ./runs/trajectory.json -f fewshot -b 1000 -o fewshot.json
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  PolicyDistillationEngine,
+  renderDistillationReport,
+  type DistilledPolicy,
+} from "agent-harness";
+
+const engine = new PolicyDistillationEngine({
+  tokenBudget: 1200,
+  includeNegativeGuidance: true,
+  includeSteeringRules: true,
+});
+
+// Distill policy from consensus result or canonical trajectory
+const policy: DistilledPolicy = engine.distillFromConsensus(consensusResult);
+
+// Format as Markdown system prompt or Anthropic XML
+const systemPrompt = engine.formatPolicy(policy, "markdown");
+
+// Create dynamic runtime dispatcher for agent monitoring
+const dispatcher = engine.createDispatcher(policy);
+
+// Evaluate incoming agent step at runtime
+const feedback = dispatcher.evaluateStep({
+  turnNumber: 1,
+  toolName: "bash",
+  arguments: { command: "rm -rf /tmp/data" },
+});
+
+if (feedback.action === "block") {
+  console.warn("Blocked dangerous command:", feedback.message);
+}
+```
+
 ## Architecture Specification
 
 For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).

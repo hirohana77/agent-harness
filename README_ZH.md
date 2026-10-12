@@ -535,6 +535,78 @@ console.log("黄金轨迹步骤数:", result.canonicalTrajectory.totalSteps);
 const report = renderConsensusReport(result, "markdown");
 ```
 
+## 轨迹策略蒸馏与自愈先验引导引擎 (Trajectory Policy Distillation & Dynamic Guidance Engine)
+
+当多轨迹集群共识比对生成了**规范黄金轨迹 (Canonical Golden Trajectory)** 并锁定了高危**死区陷阱 (Dead-End Traps)** 后，**策略蒸馏与先验引导引擎** (`src/distillation`) 补齐了智能体闭环进化的关键拼图。它将散落的轨迹知识自动蒸馏为结构化先验策略、不变里程碑路线图（Milestone Roadmap）、负向防陷阱规则（Anti-Patterns）以及受 Token 预算约束的少样本示范（Few-Shot Exemplars），并在运行时动态分发引导信号，避免智能体在后续任务或重试中重蹈覆辙。
+
+### 1. 核心能力
+- **多源轨迹策略智能蒸馏**：
+  - 支持从集群共识结果 (`ClusterConsensusResult`)、规范黄金轨迹 (`CanonicalTrajectory`) 或单次运行轨迹 (`Trajectory`) 中一键提炼策略。
+  - 自动从瓶颈检查点提取正向里程碑节点（标注 `critical`、`recommended` 重要级）。
+  - 自动将死区陷阱与高频报错聚类转化为负向禁阻规则 (`NegativePatternGuidance`) 并附带自愈补救建议。
+- **Token 预算约束与冗余步骤压缩**：
+  - 自动去重连续冗余探测步骤（如无意义的重复目录扫描与空调用）。
+  - 支持严格 Token 预算约束（如 500、1500 tokens），采用中间探索轮次智能剪枝与输出摘要压缩，保留关键起点、终点与关键检查点。
+- **运行时动态引导分发器 (Dynamic Guidance Dispatcher)**：
+  - 内置智能体状态机 (`tracking`、`milestones_complete`、`diverged`、`blocked`)。
+  - 实时评估执行步骤，输出动态反馈 (`hint`、`warn`、`block`、`milestone_advance`、`diverged`)。
+  - 实时识别危险陷阱命令并即时阻断，给出替代方案建议。
+- **动态断点控制器 (Steering Controller) 无缝集成**：
+  - 自动生成符合 `SteeringController` 规范的断点拦截规则，实现开箱即用的运行时干预 (`override_tool`、`inject_prompt`)。
+- **多目标格式导出器**：
+  - `markdown`：格式化为系统提示词小节 (`# Strategic Execution Guidance & Proven Milestones`)。
+  - `anthropic`：适配 Claude 的 XML 标签规范 (`<distilled_guidance>...</distilled_guidance>`)。
+  - `fewshot`：符合 OpenAI 函数调用规范的对话消息数组。
+  - `steering`：导出为断点规则 JSON 文件。
+  - `terminal` & `markdown`：美观的高亮可视化评估报告。
+
+### 2. 命令行使用示例 (CLI)
+```bash
+# 从集群共识结果中蒸馏策略并在终端显示 ANSI 报告
+agent-harness distill -i ./runs/consensus-result.json
+
+# 导出 Markdown 提示词引导并在指定路径生成动态断点规则
+agent-harness distill -i ./runs/canonical.json -f markdown -o policy-guidance.md --export-steering ./steering-rules.json
+
+# 设定 1000 Token 预算限制并导出 OpenAI 格式 Few-shot 对话数组
+agent-harness distill -i ./runs/trajectory.json -f fewshot -b 1000 -o fewshot.json
+```
+
+### 3. SDK 编程接口示例
+```typescript
+import {
+  PolicyDistillationEngine,
+  renderDistillationReport,
+  type DistilledPolicy,
+} from "agent-harness";
+
+const engine = new PolicyDistillationEngine({
+  tokenBudget: 1200,
+  includeNegativeGuidance: true,
+  includeSteeringRules: true,
+});
+
+// 从共识结果中蒸馏策略
+const policy: DistilledPolicy = engine.distillFromConsensus(consensusResult);
+
+// 格式化为 Markdown 系统提示词
+const systemPrompt = engine.formatPolicy(policy, "markdown");
+
+// 创建运行时动态引导器
+const dispatcher = engine.createDispatcher(policy);
+
+// 在执行过程中实时评估步骤
+const feedback = dispatcher.evaluateStep({
+  turnNumber: 1,
+  toolName: "bash",
+  arguments: { command: "rm -rf /tmp/data" },
+});
+
+if (feedback.action === "block") {
+  console.warn("已拦截危险命令:", feedback.message);
+}
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。
