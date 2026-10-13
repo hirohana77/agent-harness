@@ -15,6 +15,7 @@ import {
   CurriculumResultSchema,
 } from './schemas.js';
 import { AgentAdapter, ScenarioDefinition, HarnessReport } from '../core/types.js';
+import { AgentExecutionContext } from '../core/harness.js';
 import { DistilledPolicy } from '../distillation/types.js';
 
 export type CurriculumDifficultyLevel = z.infer<typeof CurriculumDifficultyLevelSchema>;
@@ -47,8 +48,10 @@ export interface ScenarioMutator {
   };
 }
 
+export type CurriculumAgentTarget = AgentAdapter | ((ctx: AgentExecutionContext) => Promise<void>);
+
 export interface CurriculumExecutionOptions {
-  agent: AgentAdapter;
+  agent: CurriculumAgentTarget;
   plan: CurriculumPlan;
   guidancePolicy?: DistilledPolicy;
   concurrency?: number;
