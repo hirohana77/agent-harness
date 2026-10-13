@@ -223,6 +223,48 @@ export class AutoCurriculumRunner {
       const harnessResult = await AgentHarness.runScenario(
         scenarioCopy,
         async (ctx: AgentExecutionContext) => {
+          // Intercept command executor if guidance dispatcher is active
+          if (guidanceDispatcher) {
+            const origExecute = ctx.executor.execute.bind(ctx.executor);
+            ctx.executor.execute = async (cmd: string, opts?: any) => {
+              const feedback = guidanceDispatcher!.evaluateStep({
+                turnNumber: currentTurnNumber,
+                toolName: 'bash',
+                arguments: { command: cmd },
+              });
+              if (feedback.action === 'block') {
+                throw new Error(
+                  `[Guidance Blocked]: ${
+                    feedback.message ||
+                    feedback.suggestedAlternative ||
+                    'Action blocked by policy guidance'
+                  }`
+                );
+              }
+
+              const res = await origExecute(cmd, opts);
+
+              guidanceDispatcher!.evaluateStep({
+                turnNumber: currentTurnNumber,
+                toolName: 'bash',
+                arguments: { command: cmd },
+                previousResult: {
+                  success: res.success,
+                  output: res.output,
+                  error: res.error,
+                  exitCode: res.exitCode,
+                },
+              });
+
+              return res;
+            };
+          }
+
+          // Attach executeCommand helper for compatibility
+          (ctx as any).executeCommand = async (cmd: string, timeoutMs?: number) => {
+            return ctx.executor.execute(cmd, timeoutMs ? { timeoutMs } : {});
+          };
+
           if (typeof agent === 'function') {
             await agent(ctx);
             return;
@@ -234,34 +276,7 @@ export class AutoCurriculumRunner {
             workspacePath: ctx.workspacePath,
             signal: new AbortController().signal,
             executeCommand: async (cmd: string, timeoutMs?: number): Promise<ToolCallResult> => {
-              if (guidanceDispatcher) {
-                const feedback = guidanceDispatcher.evaluateStep({
-                  turnNumber: currentTurnNumber,
-                  toolName: 'bash',
-                  arguments: { command: cmd },
-                });
-                if (feedback.action === 'block') {
-                  throw new Error(`[Guidance Blocked]: ${feedback.message || feedback.suggestedAlternative || 'Action blocked by policy guidance'}`);
-                }
-              }
-
-              const res = await ctx.executor.execute(cmd, timeoutMs ? { timeoutMs } : {});
-
-              if (guidanceDispatcher) {
-                guidanceDispatcher.evaluateStep({
-                  turnNumber: currentTurnNumber,
-                  toolName: 'bash',
-                  arguments: { command: cmd },
-                  previousResult: {
-                    success: res.success,
-                    output: res.output,
-                    error: res.error,
-                    exitCode: res.exitCode,
-                  },
-                });
-              }
-
-              return res;
+              return ctx.executor.execute(cmd, timeoutMs ? { timeoutMs } : {});
             },
             readFile: async (p: string) => ctx.workspace.readFile(p),
             writeFile: async (p: string, c: string) => ctx.workspace.writeFile(p, c),
