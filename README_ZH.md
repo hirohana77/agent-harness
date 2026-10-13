@@ -607,6 +607,86 @@ if (feedback.action === "block") {
 }
 ```
 
+## 自适应任务合成与闭环自演进演练引擎 (Adaptive Task Synthesis & Auto-Curriculum Closed-Loop Engine)
+
+静态评估基准常面临测试集污染、断言规则僵化以及缺乏动态反馈等问题。当断言校验器、混沌工程故障注入、轨迹共识分析与策略蒸馏定位了智能体的具体弱点（如 AST 语法脆弱性、高危安全违规、预算耗尽死循环、或工作区文件路径混淆）之后，**自适应任务合成与闭环自演进演练引擎** (`src/curriculum`) 能够自动生成由浅入深的阶梯式演练关卡，对自主智能体进行闭环评测、压力测试与定向自愈修复。
+
+### 1. 核心能力与架构设计
+- **四阶渐进难度演进天梯 (4-Tier Progressive Difficulty Ladder)**：
+  - `novice`（新手）：自动注入分步指引提示词、放宽 25% 资源预算、补充规范指南文件。
+  - `intermediate`（进阶）：追加工程级严苛约束（向下兼容性、函数签名保持）、预置配置文件。
+  - `advanced`（高阶）：注入边界极限条件、收紧 15% 预算规模、强制执行安全不变式校验规则。
+  - `adversarial`（对抗）：注入干扰性废弃代码文件、欺骗性上下文噪点、收紧命令通配符并施加 25% 极度预算压力。
+- **四维变异合成器 (`TaskSynthesizer`)**：
+  - `instruction`（任务指令）：确定性可复现伪随机种子变异、混淆提示词与特定弱点规约注入。
+  - `workspace`（工作区代码库）：自动化注入诱饵文件、深层目录架构测试、TypeScript 类型定义补充。
+  - `verifier`（断言与预算）：动态缩放 `maxTurns`、`timeoutMs`、`maxTokens`，并自动注入安全与步数断言。
+  - `environment`（沙箱环境）：收紧命令执行白名单、动态扩充高危命令黑名单与沙箱安全边界。
+- **弱点漏洞诊断画像器 (`WeaknessProfiler`)**：
+  - 自动聚类分析历史 `HarnessReport` 失败数据，涵盖 7 大核心弱点分类：
+    `ast_syntax_error`、`security_violation`、`infinite_loop`、`budget_exhaustion`、`command_flakiness`、`file_integrity`、`tool_format_error`。
+  - 自动评估脆弱度指标并推荐最适配的训练关卡与定向变异配置。
+- **自适应晋级准入与能力评级 (`AutoCurriculumRunner`)**：
+  - 动态关卡晋级门禁：智能体必须在当前关卡达到设定的通过率阈值（如 $\ge 75\%$）方可解锁后续高难度阶段。
+  - Elo 能力值动态演进：结合关卡难度系数与预期通过率实时计算能力增量 ($\Delta$)。
+  - 深度联动策略蒸馏模块 (`src/distillation`)：在高级阶段无缝挂载先验引导策略，定量计算自愈通过率提升率（Uplift）。
+- **多端可视化记分牌与导出器**：
+  - `terminal`：高亮 ANSI 阶梯进度、Elo 评级变动卡片与弱点自愈雷达对比矩阵。
+  - `markdown`：适合 CI/CD 流水线与 Pull Request 评审的完整 Markdown 报告。
+  - `json`：完整的机器可读结果与量化指标。
+
+### 2. 命令行使用示例 (CLI)
+```bash
+# 针对指定场景自动合成四阶完整训练天梯并执行评测
+agent-harness curriculum -s ./scenarios/calc.yaml
+
+# 运行指定难度关卡并导出生成的课程计划 JSON
+agent-harness curriculum -s ./scenarios/calc.yaml --stages novice,intermediate --scenarios-per-stage 3 --export-plan ./curriculum-plan.json
+
+# 在高级阶段挂载策略蒸馏先验引导并输出 Markdown 评审报告
+agent-harness curriculum -s ./scenarios/calc.yaml -g ./runs/distilled-policy.json -f markdown -o ./curriculum-report.md
+
+# 设定最低能力评级门槛（若最终能力值未达标则以非零状态码退出）
+agent-harness curriculum -s ./scenarios/calc.yaml --min-competency 1050
+```
+
+### 3. SDK 编程接口示例
+```typescript
+import {
+  AutoCurriculumEngine,
+  TaskSynthesizer,
+  AutoCurriculumRunner,
+  renderCurriculumReport,
+  type CurriculumResult,
+} from "agent-harness";
+
+const engine = new AutoCurriculumEngine();
+
+// 1. 针对指定脆弱点合成单项变异任务
+const mutatedScenario = engine.synthesizeTask(baseScenario, {
+  difficulty: "advanced",
+  targetWeaknesses: ["ast_syntax_error", "security_violation"],
+  seed: 42,
+});
+
+// 2. 自动生成四阶渐进天梯计划
+const plan = engine.generatePlan(baseScenario, {
+  stages: ["novice", "intermediate", "advanced", "adversarial"],
+  scenariosPerStage: 2,
+  adaptiveGating: true,
+});
+
+// 3. 执行智能体闭环演进评测并挂载先验策略
+const result: CurriculumResult = await engine.executeCurriculum({
+  agent: myAgentAdapter,
+  plan,
+  guidancePolicy: distilledPolicy,
+  stopOnGatingFailure: true,
+});
+
+console.log(renderCurriculumReport(result, "terminal"));
+```
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。

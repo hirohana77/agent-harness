@@ -678,6 +678,86 @@ if (feedback.action === "block") {
 }
 ```
 
+## Adaptive Task Synthesis & Auto-Curriculum Closed-Loop Engine
+
+Static evaluation benchmarks often suffer from dataset contamination, rigid assertions, and a lack of adaptive feedback. Once verifiers, chaos injection, consensus analysis, and distillation identify specific agent weaknesses (e.g., AST syntax fragility, security violations, budget exhaustion, or path confusion), the **Adaptive Task Synthesis & Auto-Curriculum Closed-Loop Engine** (`src/curriculum`) automatically generates progressive difficulty ladders to evaluate, stress-test, and remediate autonomous agents in a complete closed loop.
+
+### 1. Key Capabilities
+- **4-Tier Progressive Difficulty Ladder**:
+  - `novice`: Provides explicit step-by-step guidance notes, relaxed budget scale (+25%), and auxiliary guidelines.
+  - `intermediate`: Appends realistic engineering constraints (backward compatibility, type retention) and configuration fixtures.
+  - `advanced`: Injects edge-case boundary conditions, tightens budget scale (-15%), and enforces strict trajectory security invariants.
+  - `adversarial`: Injects decoy legacy files, deceptive context distractors, wildcard command restrictions, and severe budget pressure (-25%).
+- **Multi-Dimensional Task Mutation (`TaskSynthesizer`)**:
+  - `instruction`: Deterministic seeded prompt perturbations, distractor injections, and targeted weakness mandates.
+  - `workspace`: Programmatic file perturbation, decoy file seeding, nested architecture structures, and type definitions.
+  - `verifier`: Adaptive budget scaling (`maxTurns`, `timeoutMs`, `maxTokens`) and automated trajectory invariant rule synthesis.
+  - `environment`: Security whitelist tightening, command denial expansions, and sandbox constraints.
+- **Diagnostic Vulnerability Profiling (`WeaknessProfiler`)**:
+  - Automatically analyzes collections of past `HarnessReport` runs across 7 core categories:
+    `ast_syntax_error`, `security_violation`, `infinite_loop`, `budget_exhaustion`, `command_flakiness`, `file_integrity`, `tool_format_error`.
+  - Recommends tailored curriculum stages and targeted weakness mutations.
+- **Adaptive Progression Gating & Competency Scoring (`AutoCurriculumRunner`)**:
+  - Dynamically gates progression: agents must achieve threshold pass rates (e.g. $\ge 75\%$) to advance to subsequent difficulty tiers.
+  - Dynamically updates Elo-inspired competency ratings based on stage difficulty multipliers and pass rate expectations.
+  - Seamlessly integrates distilled guidance policies (`src/distillation`) at higher stages to quantify remediation uplift.
+- **Multi-Format Visual Scorecards & Exporters**:
+  - `terminal`: Rich ANSI progression ladder, competency rating change, and target weakness remediation matrix.
+  - `markdown`: CI/CD and pull-request ready summary tables.
+  - `json`: Machine-readable results and metrics.
+
+### 2. CLI Usage
+```bash
+# Run auto-curriculum campaign against a scenario across all 4 stages
+agent-harness curriculum -s ./scenarios/calc.yaml
+
+# Run specific stages with custom scenarios per stage and export plan
+agent-harness curriculum -s ./scenarios/calc.yaml --stages novice,intermediate --scenarios-per-stage 3 --export-plan ./curriculum-plan.json
+
+# Run curriculum with distilled policy guidance injected for advanced tiers
+agent-harness curriculum -s ./scenarios/calc.yaml -g ./runs/distilled-policy.json -f markdown -o ./curriculum-report.md
+
+# Enforce minimum competency score threshold (exits non-zero on failure)
+agent-harness curriculum -s ./scenarios/calc.yaml --min-competency 1050
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  AutoCurriculumEngine,
+  TaskSynthesizer,
+  AutoCurriculumRunner,
+  renderCurriculumReport,
+  type CurriculumResult,
+} from "agent-harness";
+
+const engine = new AutoCurriculumEngine();
+
+// 1. Synthesize a mutated scenario targeting specific weaknesses
+const mutatedScenario = engine.synthesizeTask(baseScenario, {
+  difficulty: "advanced",
+  targetWeaknesses: ["ast_syntax_error", "security_violation"],
+  seed: 42,
+});
+
+// 2. Generate a 4-tier progressive curriculum plan
+const plan = engine.generatePlan(baseScenario, {
+  stages: ["novice", "intermediate", "advanced", "adversarial"],
+  scenariosPerStage: 2,
+  adaptiveGating: true,
+});
+
+// 3. Execute agent across the curriculum with policy guidance
+const result: CurriculumResult = await engine.executeCurriculum({
+  agent: myAgentAdapter,
+  plan,
+  guidancePolicy: distilledPolicy,
+  stopOnGatingFailure: true,
+});
+
+console.log(renderCurriculumReport(result, "terminal"));
+```
+
 ## Architecture Specification
 
 For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).
