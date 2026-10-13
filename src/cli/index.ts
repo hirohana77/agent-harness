@@ -38,6 +38,14 @@ import {
   type DistillationReportFormat,
 } from "../distillation/index.js";
 
+import {
+  AutoCurriculumEngine,
+  renderCurriculumReport,
+  CurriculumPlanSchema,
+  type CurriculumReportFormat,
+  type CurriculumDifficultyLevel,
+} from "../curriculum/index.js";
+
 const program = new Command();
 
 program
@@ -821,5 +829,93 @@ program
     }
   });
 
+// curriculum command
+program
+  .command("curriculum")
+  .description("Execute an adaptive auto-curriculum closed-loop benchmark campaign with task mutations and gating")
+  .requiredOption("-s, --scenario <path>", "Path to base scenario file (YAML/JSON)")
+  .option("-p, --plan <path>", "Path to custom curriculum plan file (YAML/JSON)")
+  .option("--stages <stages>", "Comma-separated curriculum stages (novice,intermediate,advanced,adversarial)", "novice,intermediate,advanced,adversarial")
+  .option("--scenarios-per-stage <count>", "Number of mutated tasks per stage", "2")
+  .option("-g, --guidance <path>", "Path to distilled policy JSON for guided stages")
+  .option("-f, --format <format>", "Curriculum report output format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "File path to save the curriculum report")
+  .option("--export-plan <path>", "File path to export the synthesized curriculum plan")
+  .option("--no-gating", "Disable adaptive progression gating")
+  .option("--min-competency <score>", "Fail exit code if final competency score is below threshold", "0")
+  .action(async (options) => {
+    try {
+      const scenario = await loadScenario(options.scenario);
+      const engine = new AutoCurriculumEngine();
+
+      let guidancePolicy: any;
+      if (options.guidance) {
+        const resolvedGuidance = path.resolve(options.guidance);
+        const rawGuidance = await fs.readFile(resolvedGuidance, "utf8");
+        guidancePolicy = JSON.parse(rawGuidance);
+      }
+
+      let plan;
+      if (options.plan) {
+        const resolvedPlan = path.resolve(options.plan);
+        const rawPlan = await fs.readFile(resolvedPlan, "utf8");
+        const parsed = resolvedPlan.endsWith(".yaml") || resolvedPlan.endsWith(".yml") ? yaml.parse(rawPlan) : JSON.parse(rawPlan);
+        plan = CurriculumPlanSchema.parse(parsed);
+      } else {
+        const stageLevels = options.stages.split(",").map((s: string) => s.trim().toLowerCase()) as CurriculumDifficultyLevel[];
+        const scenariosPerStage = parseInt(options.scenariosPerStage, 10) || 2;
+        plan = engine.generatePlan(scenario, {
+          stages: stageLevels,
+          scenariosPerStage,
+          adaptiveGating: options.gating !== false,
+        });
+      }
+
+      if (options.exportPlan) {
+        const planPath = path.resolve(options.exportPlan);
+        await fs.mkdir(path.dirname(planPath), { recursive: true });
+        await fs.writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
+        console.log(chalk.green(`✔ Synthesized curriculum plan exported to: ${options.exportPlan}`));
+      }
+
+      const defaultAgentRunner = async (ctx: any) => {
+        ctx.recorder.startTurn("Autonomous curriculum execution");
+        ctx.recorder.completeTurn("Stage scenario step finished");
+      };
+
+      const result = await engine.executeCurriculum({
+        agent: defaultAgentRunner,
+        plan,
+        guidancePolicy,
+        stopOnGatingFailure: options.gating !== false,
+      });
+
+      const rendered = renderCurriculumReport(result, options.format as CurriculumReportFormat);
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, rendered, "utf8");
+        console.log(chalk.gray(`Curriculum report written to: ${options.output}`));
+      } else {
+        console.log(rendered);
+      }
+
+      const minCompetency = parseFloat(options.minCompetency) || 0;
+      if (result.finalCompetency < minCompetency) {
+        console.error(
+          chalk.red(
+            `✘ Final competency rating (${result.finalCompetency}) below minimum threshold (${minCompetency})`
+          )
+        );
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Auto-curriculum execution failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
+
 
