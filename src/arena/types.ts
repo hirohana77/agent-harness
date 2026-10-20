@@ -29,7 +29,15 @@ export type ArenaReport = z.infer<typeof ArenaReportSchema>;
 
 export type AgentCandidateTarget = AgentAdapter | ((ctx: AgentExecutionContext) => Promise<void>);
 
-export interface CandidateWithTarget extends AgentCandidate {
+export interface CandidateWithTarget {
+  id: string;
+  name: string;
+  description?: string;
+  initialRating?: number;
+  initialRd?: number;
+  initialVolatility?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
   target: AgentCandidateTarget;
 }
 

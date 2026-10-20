@@ -5,3 +5,4 @@ export * from "./rating.js";
 export * from "./scheduler.js";
 export * from "./runner.js";
 export * from "./engine.js";
+export * from "./reporters/index.js";

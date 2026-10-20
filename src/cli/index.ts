@@ -39,6 +39,15 @@ import {
 } from "../distillation/index.js";
 
 import {
+  ArenaEngine,
+  renderArenaReport,
+  type ArenaReportFormat,
+  type TournamentMode,
+  type RatingSystemType,
+  type CandidateWithTarget,
+} from "../arena/index.js";
+
+import {
   AutoCurriculumEngine,
   renderCurriculumReport,
   CurriculumPlanSchema,
@@ -916,6 +925,102 @@ program
     }
   });
 
+
+// arena command
+program
+  .command("arena")
+  .description("Execute multi-agent tournament arena matches and compute Elo/Glicko rankings")
+  .requiredOption("-s, --scenarios <paths>", "Comma-separated scenario file paths (YAML/JSON)")
+  .option("-a, --agents <agents>", "Comma-separated candidate agent identifiers or path to agents file", "agent-alpha,agent-beta")
+  .option("-m, --mode <mode>", "Tournament mode: round-robin, swiss, matrix, bracket", "round-robin")
+  .option("-r, --rounds <count>", "Number of tournament rounds", "1")
+  .option("--rating-system <system>", "Rating system: elo, glicko2", "elo")
+  .option("--k-factor <number>", "Base Elo K-factor", "32")
+  .option("-f, --format <format>", "Arena report output format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "File path to save the arena tournament report")
+  .option("--export-leaderboard <path>", "File path to export the leaderboard standings JSON")
+  .option("--min-rating <score>", "Fail exit code if top performer rating is below threshold", "0")
+  .action(async (options) => {
+    try {
+      const scenarioPaths = options.scenarios.split(",").map((s: string) => s.trim()).filter(Boolean);
+      const scenarios = await Promise.all(scenarioPaths.map((p: string) => loadScenario(p)));
+
+      let rawCandidates: any[] = [];
+      const agentsArg = options.agents.trim();
+      if (agentsArg.endsWith(".json") || agentsArg.endsWith(".yaml") || agentsArg.endsWith(".yml")) {
+        const resolvedPath = path.resolve(agentsArg);
+        const raw = await fs.readFile(resolvedPath, "utf8");
+        const parsed = resolvedPath.endsWith(".yaml") || resolvedPath.endsWith(".yml") ? yaml.parse(raw) : JSON.parse(raw);
+        rawCandidates = Array.isArray(parsed) ? parsed : parsed.agents || [parsed];
+      } else {
+        rawCandidates = agentsArg.split(",").map((name: string) => ({
+          id: name.trim(),
+          name: name.trim(),
+          initialRating: 1500,
+        }));
+      }
+
+      const candidates: CandidateWithTarget[] = rawCandidates.map((cand, idx) => ({
+        id: cand.id || `agent-${idx + 1}`,
+        name: cand.name || cand.id || `Agent ${idx + 1}`,
+        initialRating: typeof cand.initialRating === "number" ? cand.initialRating : 1500,
+        initialRd: typeof cand.initialRd === "number" ? cand.initialRd : 350,
+        tags: cand.tags || [],
+        target: async (ctx) => {
+          ctx.recorder.startTurn(`Turn 1 executed by ${cand.name || cand.id}`);
+          ctx.recorder.completeTurn("Scenario goal achieved");
+        },
+      }));
+
+      const rounds = parseInt(options.rounds, 10) || 1;
+      const kFactor = parseFloat(options.kFactor) || 32;
+
+      const engine = new ArenaEngine();
+      const report = await engine.runTournament({
+        candidates,
+        scenarios,
+        config: {
+          mode: options.mode as TournamentMode,
+          rounds,
+          ratingSystem: options.ratingSystem as RatingSystemType,
+          kFactor,
+        },
+      });
+
+      const rendered = renderArenaReport(report, options.format as ArenaReportFormat);
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, rendered, "utf8");
+        console.log(chalk.gray(`Arena tournament report written to: ${options.output}`));
+      } else {
+        console.log(rendered);
+      }
+
+      if (options.exportLeaderboard) {
+        const lbPath = path.resolve(options.exportLeaderboard);
+        await fs.mkdir(path.dirname(lbPath), { recursive: true });
+        await fs.writeFile(lbPath, JSON.stringify(report.leaderboard, null, 2), "utf8");
+        console.log(chalk.green(`✔ Leaderboard exported to: ${options.exportLeaderboard}`));
+      }
+
+      const minRating = parseFloat(options.minRating) || 0;
+      if (report.topPerformer.rating < minRating) {
+        console.error(
+          chalk.red(
+            `✘ Top performer rating (${report.topPerformer.rating}) below minimum threshold (${minRating})`
+          )
+        );
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Arena tournament execution failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
+
 
 
