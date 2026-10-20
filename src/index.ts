@@ -49,3 +49,4 @@ export * from './chaos/index.js';
 export * from './consensus/index.js';
 export * from './distillation/index.js';
 export * from './curriculum/index.js';
+export * from './arena/index.js';
