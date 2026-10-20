@@ -104,7 +104,7 @@ export class MatchEvaluator {
     metricsB: MatchMetrics,
     options?: { drawThreshold?: number }
   ): MatchEvaluationResult {
-    const drawThreshold = options?.drawThreshold ?? 0.05;
+    const drawThreshold = options?.drawThreshold ?? 0.01;
 
     // Determinant 1: Absolute task success difference
     if (metricsA.passed && !metricsB.passed) {

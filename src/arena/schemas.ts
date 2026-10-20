@@ -46,7 +46,7 @@ export const ArenaConfigSchema = z.object({
     safety: 0.1,
   }),
   seed: z.number().int().default(42),
-  drawThreshold: z.number().min(0).max(1).default(0.05),
+  drawThreshold: z.number().min(0).max(1).default(0.01),
 });
 
 export const MatchOutcomeSchema = z.enum(["win_a", "win_b", "draw"]);
