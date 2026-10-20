@@ -687,6 +687,92 @@ const result: CurriculumResult = await engine.executeCurriculum({
 console.log(renderCurriculumReport(result, "terminal"));
 ```
 
+## 多智能体演练竞技场与天梯排位引擎 (Multi-Agent Arena)
+
+单一孤立测试难以客观反映智能体在复杂多变任务中的相对能力水准。当面对多个不同基座模型（如 GPT-4o、Claude 3.5 Sonnet、DeepSeek V3、Llama 3）、Prompt 迭代版本或引导干预策略时，需要标准化的头对头竞技评测体系。**多智能体演练竞技场与天梯排位引擎** (`src/arena`) 提供多候选竞技调度、细粒度综合评判仲裁、科学的 Elo/Glicko-2 积分演进、双向交叉对决矩阵与可视化天梯榜单。
+
+### 1. 核心能力
+- **多元锦标赛赛制调度 (`MatchScheduler`)**:
+  - `round-robin`（全循环赛）：所有候选智能体两两配对，在全部测试场景与轮次上展开全量头对头对抗。
+  - `swiss`（瑞士轮）：根据即时天梯积分动态撮合水平相当的对手，避免同对手重复对决，在大规模智能体池中快速收敛排位。
+  - `matrix`（基准矩阵）：全候选智能体并行遍历完整基准题库，生成全域评测剖面。
+  - `bracket`（单败淘汰）：按预设或当前排位种子对阵（第 $1$ 对阵第 $N$，第 $2$ 对阵第 $N-1$），模拟激烈的锦标赛晋级。
+- **多维度头对头综合仲裁器 (`MatchEvaluator`)**:
+  - **确定性任务断言门禁**：首要判定准则——任务验证通过绝对战胜失败。
+  - **多维决胜打分机制**：当双方均成功（或均失败）时，结合权重归一化计算效率与安全性综合分：
+    - *轮次效率（Turn Efficiency）*：惩罚多余试探性轮次。
+    - *Token 消耗效率（Token Efficiency）*：评估模型推理开销与上下文经济性。
+    - *执行速度（Speed/Duration）*：奖励高效低延迟完成者。
+    - *安全合规（Safety/Guardrails）*：扣除越权探测、恶意命令与沙箱违规行为分。
+  - **自适应平局公差（Draw Tolerance）**：微小性能差异（如分差 $le 0.01$）自动判定为战平，避免微小扰动造成虚假胜负。
+- **科学评级演进引擎 (`IRatingEngine`)**:
+  - **自适应 Elo 引擎 (`EloRatingEngine`)**：经典 Elo 期望胜率曲线，搭载动态 K 值自适应调节（新手阶段放大 K 值以加速定位，成熟阶段收紧 K 值防止积分震荡）。
+  - **Glicko-2 引擎 (`Glicko2RatingEngine`)**：涵盖能力分（$R$）、评分偏差确定度（$RD$）及波动率（$sigma$），提供置信区间。
+- **双向交战交叉矩阵与胜率预测**:
+  - 输出 $N \times N$ 双向交战胜负平对决表（`wins / draws / losses`）。
+  - 基于当前评分即时预测两两对决期望胜率（`predictMatchOutcome`）。
+- **多端可视化排行榜与导出**:
+  - `terminal`：终端高亮 ANSI 奖牌榜（🥇、🥈、🥉）、双向对决胜负阵列与关键性能指标。
+  - `markdown`：适配 GitHub PR、Wiki 与 CI/CD 流程的标准 Markdown 表格。
+  - `json`：供数据分析与自动化管道接入的完整结构化锦标赛报告。
+
+### 2. CLI 命令行使用
+```bash
+# 在指定场景上启动多个智能体候选的循环对抗赛
+agent-harness arena -s ./scenarios/calc.yaml -a "claude-3-5,gpt-4o,deepseek-v3"
+
+# 运行瑞士轮锦标赛，采用 Glicko-2 算法评级并导出排行榜 JSON
+agent-harness arena -s ./scenarios/calc.yaml -a "agent-a,agent-b,agent-c,agent-d" --mode swiss --rating-system glicko2 --export-leaderboard ./leaderboard.json
+
+# 运行两轮对抗赛并将 Markdown 报告持久化至文件
+agent-harness arena -s ./scenarios/calc.yaml -a ./agents.json -m round-robin -r 2 -f markdown -o ./arena-report.md
+
+# 设置冠军最低能力评分门禁（低于阈值退出码非零，适用于持续交付把关）
+agent-harness arena -s ./scenarios/calc.yaml -a "agent-1,agent-2" --min-rating 1550
+```
+
+### 3. Programmatic SDK 编程调用
+```typescript
+import {
+  ArenaEngine,
+  renderArenaReport,
+  type CandidateWithTarget,
+} from "agent-harness";
+
+const engine = new ArenaEngine();
+
+const candidates: CandidateWithTarget[] = [
+  {
+    id: "claude-3-5-sonnet",
+    name: "Claude 3.5 Sonnet",
+    initialRating: 1500,
+    target: claudeAgentAdapter,
+  },
+  {
+    id: "gpt-4o",
+    name: "GPT-4o",
+    initialRating: 1500,
+    target: gptAgentAdapter,
+  },
+];
+
+// 1. 发起单场 1v1 头对头对决
+const matchResult = await engine.evaluateMatch(candidates[0], candidates[1], scenario);
+console.log(`胜负判定: ${matchResult.outcome}, 领先优势: ${matchResult.margin}`);
+
+// 2. 发起多智能体锦标赛
+const tournamentReport = await engine.runTournament({
+  candidates,
+  scenarios: [scenarioA, scenarioB],
+  config: { mode: "round-robin", rounds: 1, ratingSystem: "elo" },
+});
+
+// 3. 渲染控制台天梯榜与对决阵列
+console.log(renderArenaReport(tournamentReport, "terminal"));
+```
+
+---
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。

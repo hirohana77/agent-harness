@@ -13,6 +13,7 @@
 
 ## Highlights
 
+- **Multi-Agent Tournament Arena & Elo/Glicko Ladder Engine**: Pairwise head-to-head competitive evaluation, multi-criteria tie-breakers, Round-Robin/Swiss/Matrix tournament modes, calibrated Elo & Glicko-2 ratings, cross-table matrix, and multi-format leaderboards.
 - **Pluggable Sandbox Backends**: Run benchmarks in lightweight local temporary environments or fully virtualized **Docker / Podman** containers with cgroups resource limits and network isolation.
 - **SWE-bench Task Adapter & Evaluation Engine**: Seamlessly import SWE-bench, SWE-bench Lite, and SWE-bench Verified tasks from JSONL; automatically bind container images, inject `FAIL_TO_PASS` and `PASS_TO_PASS` test assertions, and compute standard resolution rates.
 - **Isolated Workspace**: Dynamically provisions ephemeral workspaces with git baseline snapshots and strict path confinement.
@@ -757,6 +758,91 @@ const result: CurriculumResult = await engine.executeCurriculum({
 
 console.log(renderCurriculumReport(result, "terminal"));
 ```
+
+## Multi-Agent Tournament Arena & Elo/Glicko Ladder Engine
+
+Evaluating single agents in isolation only reveals partial capability. Comparing multiple agent architectures, model providers (e.g. GPT-4o, Claude 3.5 Sonnet, DeepSeek V3, Llama 3), prompt revisions, or steering policies requires head-to-head competitive benchmarking. The **Multi-Agent Tournament Arena & Elo/Glicko Ladder Engine** (`src/arena`) coordinates multi-candidate tournaments, calculates calibrated relative rankings, computes cross-table match statistics, and provides tournament bracket visualization.
+
+### 1. Key Capabilities
+- **Flexible Tournament Modes (`MatchScheduler`)**:
+  - `round-robin`: Exhaustive all-pairs head-to-head competition across all test scenarios and rounds.
+  - `swiss`: Dynamic progressive pairing matching agents with comparable skill ratings without repeat matches.
+  - `matrix`: Full-matrix evaluation across all scenarios and candidate agents.
+  - `bracket`: Single-elimination seeded knockout tournament ($1$ vs $N$, $2$ vs $N-1$).
+- **Multi-Dimensional Pairwise Judgement (`MatchEvaluator`)**:
+  - **Deterministic Task Verification**: Primary decision gate—task pass beats fail unequivocally.
+  - **Multi-Criteria Tie-Breakers**: When both candidates pass (or both fail), computes normalized scores across:
+    - *Turn Efficiency*: Minimizes unnecessary exploratory turns.
+    - *Token Budget Efficiency*: Minimizes token consumption and inference cost.
+    - *Runtime Speed*: Minimizes scenario execution latency.
+    - *Safety & Guardrails*: Penalizes security and sandbox infractions.
+  - **Calibrated Draw Tolerance**: Fine-grained `drawThreshold` prevents spurious wins when scores differ trivially.
+- **Statistical Rating Engines (`IRatingEngine`)**:
+  - **Adaptive Elo Engine (`EloRatingEngine`)**: Classic Elo rating with dynamic K-factors (higher volatility for provisional matches, stabilized K for established veterans).
+  - **Glicko-2 Engine (`Glicko2RatingEngine`)**: Comprehensive skill rating ($R$), rating deviation ($RD$), and volatility ($sigma$) tracking confidence bounds.
+- **Cross-Table Matrix & Dominance Statistics**:
+  - Complete $N \times N$ pairwise cross-table (`wins / draws / losses`) across all candidates.
+  - Direct head-to-head win-rate and probability estimation (`predictMatchOutcome`).
+- **Multi-Format Visual Reports**:
+  - `terminal`: ANSI leaderboard with medal standings (🥇, 🥈, 🥉), cross-table grid, and performance stats.
+  - `markdown`: Publication-grade Markdown tables for READMEs, PR reviews, and CI/CD artifacts.
+  - `json`: Machine-readable tournament reports and exported leaderboards.
+
+### 2. CLI Usage
+```bash
+# Run a round-robin tournament between multiple candidate agents on scenarios
+agent-harness arena -s ./scenarios/calc.yaml -a "claude-3-5,gpt-4o,deepseek-v3"
+
+# Run a Swiss-system tournament with Glicko-2 rating engine and export leaderboard
+agent-harness arena -s ./scenarios/calc.yaml -a "agent-a,agent-b,agent-c,agent-d" --mode swiss --rating-system glicko2 --export-leaderboard ./leaderboard.json
+
+# Run tournament and render Markdown report to a file
+agent-harness arena -s ./scenarios/calc.yaml -a ./agents.json -m round-robin -r 2 -f markdown -o ./arena-report.md
+
+# Enforce minimum rating threshold on tournament champion
+agent-harness arena -s ./scenarios/calc.yaml -a "agent-1,agent-2" --min-rating 1550
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  ArenaEngine,
+  renderArenaReport,
+  type CandidateWithTarget,
+} from "agent-harness";
+
+const engine = new ArenaEngine();
+
+const candidates: CandidateWithTarget[] = [
+  {
+    id: "claude-3-5-sonnet",
+    name: "Claude 3.5 Sonnet",
+    initialRating: 1500,
+    target: claudeAgentAdapter,
+  },
+  {
+    id: "gpt-4o",
+    name: "GPT-4o",
+    initialRating: 1500,
+    target: gptAgentAdapter,
+  },
+];
+
+// Run direct 1v1 match
+const matchResult = await engine.evaluateMatch(candidates[0], candidates[1], scenario);
+console.log(`Outcome: ${matchResult.outcome}, Margin: ${matchResult.margin}`);
+
+// Run full tournament
+const tournamentReport = await engine.runTournament({
+  candidates,
+  scenarios: [scenarioA, scenarioB],
+  config: { mode: "round-robin", rounds: 1, ratingSystem: "elo" },
+});
+
+console.log(renderArenaReport(tournamentReport, "terminal"));
+```
+
+---
 
 ## Architecture Specification
 
