@@ -6,3 +6,4 @@ export * from "./detector.js";
 export * from "./guardrails.js";
 export * from "./runner.js";
 export * from "./engine.js";
+export * from "./reporters/index.js";

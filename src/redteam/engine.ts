@@ -6,17 +6,12 @@ import {
   RedTeamProbe,
   RedTeamRiskCategory,
   ProbeSeverity,
+  DefenseBenchmarkComparison,
 } from "./types.js";
 import { RedTeamRunner } from "./runner.js";
 import { RedTeamProbeCatalog } from "./catalog.js";
 
-export interface DefenseBenchmarkComparison {
-  baselineReport: RedTeamAuditReport;
-  guardedReport: RedTeamAuditReport;
-  deltaAttackSuccessRate: number; // baseline ASR - guarded ASR (positive is improvement)
-  deltaSafetyScore: number; // guarded score - baseline score (positive is improvement)
-  preventedExploitsCount: number;
-}
+
 
 export class RedTeamEngine {
   /**

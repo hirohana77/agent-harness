@@ -55,6 +55,16 @@ import {
   type CurriculumDifficultyLevel,
 } from "../curriculum/index.js";
 
+import {
+  RedTeamEngine,
+  renderRedTeamReport,
+  renderBenchmarkComparison,
+  type RedTeamReportFormat,
+  type RedTeamRiskCategory,
+  type ProbeSeverity,
+  type GuardrailMode,
+} from "../redteam/index.js";
+
 const program = new Command();
 
 program
@@ -1020,7 +1030,112 @@ program
     }
   });
 
+// redteam command
+program
+  .command("redteam")
+  .description("Execute adversarial red-teaming security audit and safety guardrail evaluation")
+  .requiredOption("-s, --scenario <path>", "Path to base scenario YAML or JSON file")
+  .option("-c, --categories <categories>", "Comma-separated risk categories to test")
+  .option("--severities <severities>", "Comma-separated severities: low, medium, high, critical")
+  .option("-p, --probes <probeIds>", "Comma-separated specific probe IDs to execute")
+  .option("-g, --guardrail <mode>", "Safety guardrail enforcement mode: none, audit, enforce", "none")
+  .option("-f, --format <format>", "Output format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "File path to save the red-team safety audit report")
+  .option("--export-findings <path>", "File path to export vulnerability findings as JSON")
+  .option("--max-asr <threshold>", "Fail exit code if Attack Success Rate (0.0-1.0) exceeds threshold", "1.0")
+  .option("--min-safety-score <score>", "Fail exit code if Safety Score (0-100) is below threshold", "0")
+  .option("--benchmark-defense", "Benchmark defense posture before and after active guardrail enforcement", false)
+  .action(async (options) => {
+    try {
+      const scenario = await loadScenario(options.scenario);
+      const categories = options.categories
+        ? options.categories.split(",").map((c: string) => c.trim()).filter(Boolean) as RedTeamRiskCategory[]
+        : undefined;
+      const severities = options.severities
+        ? options.severities.split(",").map((s: string) => s.trim()).filter(Boolean) as ProbeSeverity[]
+        : undefined;
+      const probes = options.probes
+        ? options.probes.split(",").map((p: string) => p.trim()).filter(Boolean)
+        : undefined;
+
+      const engine = new RedTeamEngine();
+
+      const defaultAgent = async (ctx: any) => {
+        ctx.recorder.startTurn("Executing task instruction");
+        await ctx.executor.execute("echo 'Running task...'");
+        ctx.recorder.completeTurn("Done");
+      };
+
+      if (options.benchmarkDefense) {
+        const comparison = await engine.benchmarkDefense(defaultAgent, scenario, {
+          categories,
+          severities,
+          probes,
+        });
+
+        const rendered = renderBenchmarkComparison(comparison, options.format as RedTeamReportFormat);
+        if (options.output) {
+          const outPath = path.resolve(options.output);
+          await fs.mkdir(path.dirname(outPath), { recursive: true });
+          await fs.writeFile(outPath, rendered, "utf8");
+          console.log(chalk.gray(`Defense benchmark report written to: ${options.output}`));
+        } else {
+          console.log(rendered);
+        }
+      } else {
+        const report = await engine.auditAgent(defaultAgent, scenario, {
+          categories,
+          severities,
+          probes,
+          guardrailMode: options.guardrail as GuardrailMode,
+        });
+
+        const rendered = renderRedTeamReport(report, options.format as RedTeamReportFormat);
+
+        if (options.output) {
+          const outPath = path.resolve(options.output);
+          await fs.mkdir(path.dirname(outPath), { recursive: true });
+          await fs.writeFile(outPath, rendered, "utf8");
+          console.log(chalk.gray(`Red-team safety audit report written to: ${options.output}`));
+        } else {
+          console.log(rendered);
+        }
+
+        if (options.exportFindings) {
+          const findingsPath = path.resolve(options.exportFindings);
+          await fs.mkdir(path.dirname(findingsPath), { recursive: true });
+          await fs.writeFile(findingsPath, JSON.stringify(report.findings, null, 2), "utf8");
+          console.log(chalk.green(`✔ Vulnerability findings exported to: ${options.exportFindings}`));
+        }
+
+        const maxAsr = parseFloat(options.maxAsr) || 1.0;
+        if (report.attackSuccessRate > maxAsr) {
+          console.error(
+            chalk.red(
+              `✘ Attack Success Rate (${(report.attackSuccessRate * 100).toFixed(1)}%) exceeded maximum threshold (${(maxAsr * 100).toFixed(1)}%)`
+            )
+          );
+          process.exit(1);
+        }
+
+        const minSafety = parseFloat(options.minSafetyScore) || 0;
+        if (report.safetyScore < minSafety) {
+          console.error(
+            chalk.red(
+              `✘ Safety Score (${report.safetyScore}) below minimum required threshold (${minSafety})`
+            )
+          );
+          process.exit(1);
+        }
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Red-team evaluation failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
+
 
 
 

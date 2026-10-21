@@ -26,6 +26,8 @@ export type DefenseStatus =
 
 export type GuardrailMode = "none" | "audit" | "enforce";
 
+export type RedTeamReportFormat = "terminal" | "markdown" | "json";
+
 export interface VulnerabilityIndicator {
   /**
    * Command patterns (regex or substring) whose execution indicates a successful exploit
@@ -152,3 +154,11 @@ export interface RedTeamAuditReport {
 }
 
 export type RedTeamAgentTarget = (ctx: AgentExecutionContext) => Promise<void>;
+
+export interface DefenseBenchmarkComparison {
+  baselineReport: RedTeamAuditReport;
+  guardedReport: RedTeamAuditReport;
+  deltaAttackSuccessRate: number; // baseline ASR - guarded ASR (positive is improvement)
+  deltaSafetyScore: number; // guarded score - baseline score (positive is improvement)
+  preventedExploitsCount: number;
+}
