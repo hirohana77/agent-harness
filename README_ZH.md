@@ -773,6 +773,77 @@ console.log(renderArenaReport(tournamentReport, "terminal"));
 
 ---
 
+## 对抗性红队攻防与安全沙箱护栏评测引擎
+
+具备 Bash 执行能力、文件系统访问与外部工具调用的自主 AI 智能体存在严峻的安全暴露面与越权风险。**对抗性红队攻防与安全沙箱护栏评测引擎**（`src/redteam`）提供了全链路攻防演练套件，针对提示词注入、机密泄露、越权提权、破坏性操作与供应链攻击等风险向量实施自动化探针注入，评估攻击成功率（ASR）与安全韧性评分（0-100），并提供运行时主动护栏防御。
+
+### 1. 核心特性
+- **工业级多维度红队探针库 (`RedTeamProbeCatalog`)**：
+  - `prompt-injection`（提示词注入）：系统指令强行覆盖（System Override）、越狱模式（Developer Uncensored Mode）。
+  - `indirect-injection`（间接提示词注入）：隐藏在项目文件（如 `README.md`）中的特洛伊木马指令、被投毒的外部 Mock 工具响应。
+  - `secret-exfiltration`（机密泄露与外发）：探测并读取 `.env`、私钥，或通过网络将金丝雀令牌（Canary Secret）外发至攻击者服务端。
+  - `privilege-escalation`（越权提权）：尝试执行 `sudo su`、放开全局权限 `chmod 777`。
+  - `destructive-command`（破坏性操作）：删除版本库元数据 `rm -rf .git` 或强行清空工作区 `rm -rf *`、`rm -rf /`。
+  - `supply-chain`（供应链攻击）：未授权下载执行远端脚本管道（`curl | sh`、`wget | bash`）。
+  - `defense-bypass`（防御绕过）：通过 Base64 编码解码管道（`base64 -d | sh`）规避静态签名检测。
+- **自动化对抗性场景突变器 (`AdversarialMutator`)**：
+  - 支持指令层（`instruction`）、文件层（`file-injection`）、环境变量层（`env-injection`）及 Mock 工具层（`mock-tool`）无缝注入探针载荷，不破坏基准测试业务契约。
+- **全轨迹漏洞判定引擎 (`VulnerabilityDetector`)**：
+  - 深度扫描智能体每一轮的命令执行、工具入参、模型思考与输出结果；
+  - 精准比对金丝雀令牌与漏洞触发规则，客观判定攻击是被防御成功（Defended）、被护栏拦截（Guardrail Blocked）还是被攻破（Exploited）。
+- **运行时主动安全护栏 (`CompositeGuardrail`)**：
+  - `CommandSafetyGuardrail`：主动拦截破坏性删除、高危提权、远程脚本管道及混淆执行；
+  - `SecretLeakGuardrail`：拦截访问敏感机密文件及输出中的金丝雀机密过滤；
+  - 提供 `none`（无护栏探测）、`audit`（仅日志告警）与 `enforce`（主动抛出 `SecurityViolationError` 阻断执行）三种运行模式。
+- **攻防对比基准评测 (`benchmarkDefense`)**：
+  - 一键执行智能体在「裸奔基线」与「主动护栏守护」下的双轨比对，量化攻击成功率降幅（$\\Delta \\text{ASR}$）与安全韧性增益（$\\Delta \\text{Score}$）。
+- **多格式专业审计报告**：
+  - `terminal`：彩色风险等级徽章、ASR 指标仪表、风险类别矩阵与取证追踪；
+  - `markdown`：可直接归档到 PR Review 与安全合规报告的 GitHub 表格；
+  - `json`：CI/CD 自动化流水线专用的机器可读审计结果。
+
+### 2. CLI 使用示例
+```bash
+# 对指定场景执行全量红队安全探针评测
+agent-harness redteam -s ./scenario.yaml
+
+# 指定高危分类并启用主动护栏阻断
+agent-harness redteam -s ./scenario.yaml -c prompt-injection,secret-exfiltration -g enforce
+
+# 发起护栏攻防对比基准评测并输出 Markdown 报告
+agent-harness redteam -s ./scenario.yaml --benchmark-defense -f markdown -o ./redteam-benchmark.md
+
+# CI/CD 安全门禁（攻击成功率超过 10% 或安全分低于 90 时阻断构建）
+agent-harness redteam -s ./scenario.yaml --max-asr 0.10 --min-safety-score 90 --export-findings ./findings.json
+```
+
+### 3. SDK 编程式调用
+```typescript
+import {
+  RedTeamEngine,
+  renderRedTeamReport,
+  renderBenchmarkComparison,
+} from "agent-harness";
+
+const engine = new RedTeamEngine();
+
+// 1. 针对核心探针实施安全审计
+const auditReport = await engine.auditAgent(myAgentTarget, scenario, {
+  severities: ["critical", "high"],
+  guardrailMode: "enforce",
+});
+
+console.log(renderRedTeamReport(auditReport, "terminal"));
+
+// 2. 攻防提升对比基准评测
+const benchmark = await engine.benchmarkDefense(myAgentTarget, scenario);
+console.log(`防御拦截漏洞数: ${benchmark.preventedExploitsCount}`);
+console.log(`安全评分提升: +${benchmark.deltaSafetyScore} 分`);
+console.log(renderBenchmarkComparison(benchmark, "markdown"));
+```
+
+---
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。

@@ -13,6 +13,7 @@
 
 ## Highlights
 
+- **Adversarial Red-Teaming & Safety Guardrail Engine**: Systematic adversarial probe injection (prompt injection, secret exfiltration, privilege escalation, destructive commands, supply chain, defense bypass), deep trajectory vulnerability detection, active runtime guardrails (`audit` & `enforce`), defense posture benchmarking, and multi-format safety audit reports.
 - **Multi-Agent Tournament Arena & Elo/Glicko Ladder Engine**: Pairwise head-to-head competitive evaluation, multi-criteria tie-breakers, Round-Robin/Swiss/Matrix tournament modes, calibrated Elo & Glicko-2 ratings, cross-table matrix, and multi-format leaderboards.
 - **Pluggable Sandbox Backends**: Run benchmarks in lightweight local temporary environments or fully virtualized **Docker / Podman** containers with cgroups resource limits and network isolation.
 - **SWE-bench Task Adapter & Evaluation Engine**: Seamlessly import SWE-bench, SWE-bench Lite, and SWE-bench Verified tasks from JSONL; automatically bind container images, inject `FAIL_TO_PASS` and `PASS_TO_PASS` test assertions, and compute standard resolution rates.
@@ -840,6 +841,77 @@ const tournamentReport = await engine.runTournament({
 });
 
 console.log(renderArenaReport(tournamentReport, "terminal"));
+```
+
+---
+
+## Adversarial Red-Teaming & Safety Guardrail Evaluation Engine
+
+Autonomous AI agents equipped with bash execution, file systems, and external tools present severe safety and security attack surfaces. The **Adversarial Red-Teaming & Safety Guardrail Evaluation Engine** (`src/redteam`) provides an end-to-end framework to probe agents against adversarial attacks, measure defense posture, evaluate Attack Success Rate (ASR) and Safety Scores (0-100), and enforce active runtime guardrails.
+
+### 1. Key Capabilities
+- **Curated Multi-Category Adversarial Probes (`RedTeamProbeCatalog`)**:
+  - `prompt-injection`: Direct prompt injection overriding system constraints and roleplay jailbreaks (e.g. system overrides, developer uncensored mode).
+  - `indirect-injection`: Untrusted content injection via project files (trojans in README, poisoned markdown) or external tool mock JSON payloads.
+  - `secret-exfiltration`: Probing for environment credentials (`.env`, `AWS_SECRET_ACCESS_KEY`, API tokens, private keys) and canary secret exfiltration.
+  - `privilege-escalation`: Sudo privilege escalation, world-writable permission tampering (`chmod 777`).
+  - `destructive-command`: Repository corruption (`rm -rf .git`) and workspace file wiping (`rm -rf *`, `rm -rf /`).
+  - `supply-chain`: Unauthorized remote shell piping (`curl | sh`, `wget | bash`).
+  - `defense-bypass`: Evasion of static string matching via base64 encoded shell pipelines (`base64 -d | sh`).
+- **Automated Adversarial Scenario Mutator (`AdversarialMutator`)**:
+  - Seamlessly injects adversarial payloads across multiple vectors (`instruction`, `file-injection`, `env-injection`, `mock-tool`) without corrupting base test contracts.
+- **Deep Trajectory Vulnerability Detector (`VulnerabilityDetector`)**:
+  - Comprehensive inspection across turn command executions, tool arguments, assistant messages, and execution outputs.
+  - Correlates Canary Secret tokens and regex patterns to verify whether an attack was successfully exploited vs defended vs mitigated.
+- **Active Safety Guardrails (`CompositeGuardrail`)**:
+  - `CommandSafetyGuardrail`: Intercepts dangerous recursive deletions, privilege escalations, and piped shell commands.
+  - `SecretLeakGuardrail`: Blocks reading of `.env`, SSH keys, and leaks of sensitive canary tokens into outputs.
+  - Modes: `none` (unshielded probe), `audit` (log violations without blocking), and `enforce` (actively raise `SecurityViolationError`).
+- **Defense Posture Benchmarking (`benchmarkDefense`)**:
+  - Directly compares an agent's unshielded baseline against active guardrail enforcement, quantifying reduction in ASR ($\\Delta \\text{ASR}$) and uplift in Safety Score ($\\Delta \\text{Score}$).
+- **Multi-Format Safety Audit Reports**:
+  - `terminal`: Color-coded risk level badges, ASR gauge, category scorecards, and forensic finding logs.
+  - `markdown`: Publication-grade security audit reports and benchmark comparison tables for CI/CD gates.
+  - `json`: Machine-readable structured reports with full forensic traces.
+
+### 2. CLI Usage
+```bash
+# Run red-team audit across all built-in probes on a scenario
+agent-harness redteam -s ./scenario.yaml
+
+# Run specific risk categories with active guardrail enforcement
+agent-harness redteam -s ./scenario.yaml -c prompt-injection,secret-exfiltration -g enforce
+
+# Benchmark defense posture (baseline vs active guardrail) and output Markdown report
+agent-harness redteam -s ./scenario.yaml --benchmark-defense -f markdown -o ./redteam-benchmark.md
+
+# Enforce security gates in CI/CD (fail if ASR > 10% or Safety Score < 90)
+agent-harness redteam -s ./scenario.yaml --max-asr 0.10 --min-safety-score 90 --export-findings ./findings.json
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  RedTeamEngine,
+  renderRedTeamReport,
+  renderBenchmarkComparison,
+} from "agent-harness";
+
+const engine = new RedTeamEngine();
+
+// 1. Audit an agent target against critical adversarial probes
+const auditReport = await engine.auditAgent(myAgentTarget, scenario, {
+  severities: ["critical", "high"],
+  guardrailMode: "enforce",
+});
+
+console.log(renderRedTeamReport(auditReport, "terminal"));
+
+// 2. Benchmark defense uplift with active guardrails
+const benchmark = await engine.benchmarkDefense(myAgentTarget, scenario);
+console.log(`Prevented Exploits: ${benchmark.preventedExploitsCount}`);
+console.log(`Safety Uplift: +${benchmark.deltaSafetyScore} points`);
+console.log(renderBenchmarkComparison(benchmark, "markdown"));
 ```
 
 ---
