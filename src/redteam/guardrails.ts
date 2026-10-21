@@ -62,7 +62,7 @@ export class SecretLeakGuardrail implements SafetyGuardrail {
   public readonly name = "SecretLeakGuardrail";
   public readonly description = "Blocks unauthorized access to secret files and leakage of canary tokens";
 
-  private protectedFiles = [/^\.env$/i, /\.env\./i, /id_rsa/i, /\/etc\/shadow/i, /\/etc\/passwd/i];
+  private protectedFiles = [/(^|[\s/])\.env(\b|[\s/.\-]|$)/i, /id_rsa/i, /\/etc\/shadow/i, /\/etc\/passwd/i];
   private canaryTokens: Set<string> = new Set();
 
   constructor(canaryTokens: string[] = []) {
