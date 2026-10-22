@@ -65,6 +65,13 @@ import {
   type GuardrailMode,
 } from "../redteam/index.js";
 
+import {
+  ReflexionEngine,
+  renderReflexionReport,
+  renderReflexionComparison,
+  type ReflexionReportFormat,
+} from "../reflexion/index.js";
+
 const program = new Command();
 
 program
@@ -1130,6 +1137,100 @@ program
       }
     } catch (err: any) {
       console.error(chalk.red("✘ Red-team evaluation failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("reflexion")
+  .description("Analyze agent trajectory self-correction, failure episodes, and cognitive pathologies")
+  .requiredOption("-t, --trajectory <path>", "Path to trajectory JSON file")
+  .option("-c, --compare <path>", "Comparative trajectory JSON file path to benchmark self-correction improvements")
+  .option("-f, --format <format>", "Output format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "File path to save the diagnostic report")
+  .option("--export-episodes <path>", "File path to export detected failure episodes as JSON")
+  .option("--min-shr <threshold>", "Fail exit code if Self-Healing Rate (0.0-1.0) is below threshold", "0")
+  .option("--min-resilience-score <score>", "Fail exit code if Cognitive Resilience Score (0-100) is below threshold", "0")
+  .option("--max-pathologies <count>", "Fail exit code if detected pathologies count exceeds threshold")
+  .action(async (options) => {
+    try {
+      const trajectoryRaw = await fs.readFile(path.resolve(options.trajectory), "utf8");
+      const trajectory = JSON.parse(trajectoryRaw);
+
+      const engine = new ReflexionEngine();
+
+      if (options.compare) {
+        const comparativeRaw = await fs.readFile(path.resolve(options.compare), "utf8");
+        const comparative = JSON.parse(comparativeRaw);
+
+        const baselineReport = engine.analyzeTrajectory(trajectory);
+        const comparativeReport = engine.analyzeTrajectory(comparative);
+        const comparison = engine.compare(baselineReport, comparativeReport);
+
+        const rendered = renderReflexionComparison(comparison, options.format as ReflexionReportFormat);
+
+        if (options.output) {
+          const outPath = path.resolve(options.output);
+          await fs.mkdir(path.dirname(outPath), { recursive: true });
+          await fs.writeFile(outPath, rendered, "utf8");
+          console.log(chalk.gray(`Reflexion comparison report written to: ${options.output}`));
+        } else {
+          console.log(rendered);
+        }
+      } else {
+        const report = engine.analyzeTrajectory(trajectory);
+        const rendered = renderReflexionReport(report, options.format as ReflexionReportFormat);
+
+        if (options.output) {
+          const outPath = path.resolve(options.output);
+          await fs.mkdir(path.dirname(outPath), { recursive: true });
+          await fs.writeFile(outPath, rendered, "utf8");
+          console.log(chalk.gray(`Reflexion diagnostic report written to: ${options.output}`));
+        } else {
+          console.log(rendered);
+        }
+
+        if (options.exportEpisodes) {
+          const episodesPath = path.resolve(options.exportEpisodes);
+          await fs.mkdir(path.dirname(episodesPath), { recursive: true });
+          await fs.writeFile(episodesPath, JSON.stringify(report.episodes, null, 2), "utf8");
+          console.log(chalk.green(`✔ Failure episodes exported to: ${options.exportEpisodes}`));
+        }
+
+        const minShr = parseFloat(options.minShr) || 0;
+        if (report.metrics.selfHealingRate < minShr) {
+          console.error(
+            chalk.red(
+              `✘ Self-Healing Rate (${(report.metrics.selfHealingRate * 100).toFixed(1)}%) below minimum threshold (${(minShr * 100).toFixed(1)}%)`
+            )
+          );
+          process.exit(1);
+        }
+
+        const minScore = parseFloat(options.minResilienceScore) || 0;
+        if (report.metrics.cognitiveResilienceScore < minScore) {
+          console.error(
+            chalk.red(
+              `✘ Cognitive Resilience Score (${report.metrics.cognitiveResilienceScore}) below minimum threshold (${minScore})`
+            )
+          );
+          process.exit(1);
+        }
+
+        if (options.maxPathologies !== undefined) {
+          const maxPath = parseInt(options.maxPathologies, 10);
+          if (report.metrics.pathologyCount > maxPath) {
+            console.error(
+              chalk.red(
+                `✘ Pathology count (${report.metrics.pathologyCount}) exceeded maximum allowed threshold (${maxPath})`
+              )
+            );
+            process.exit(1);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Reflexion analysis failed:"), err.message);
       process.exit(1);
     }
   });
