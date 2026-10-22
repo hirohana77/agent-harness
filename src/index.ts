@@ -51,3 +51,4 @@ export * from './distillation/index.js';
 export * from './curriculum/index.js';
 export * from './arena/index.js';
 export * from './redteam/index.js';
+export * from './reflexion/index.js';
