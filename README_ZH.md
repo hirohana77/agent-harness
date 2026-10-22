@@ -12,6 +12,7 @@
 
 ## 核心特性
 
+- **智能体反思与自愈诊断评测引擎 (Agent Reflexion & Self-Correction)**：针对 7 大错误类别（`command-failure`、`test-regression`、`file-not-found`、`syntax-ast-error`、`permission-denied`、`hallucinated-tool`、`tool-error`）实施全轨迹失败事件追踪，深度识别 5 种认知病理行为（死循环震荡、盲目重试、错误漠视、双向震荡、级联退化），量化自愈率（SHR）、平均修复轮次（MTTR）、震荡指数与认知韧性评分（0-100），提供言语反思提示词合成器与攻防提升对比基准。
 - 🐳 **可插拔沙箱后端 (Docker & Podman)**：支持轻量级本地环境与全虚拟化 Docker / Podman 容器驱动，提供 cgroups 资源限制（内存、CPU、进程数）与完全网络隔离（`network: none`）。
 - 🏆 **SWE-bench 任务集适配器与评测引擎**：原生支持导入 SWE-bench / Lite / Verified JSONL 格式任务集，自动装配专属容器镜像、提取 `FAIL_TO_PASS` 与 `PASS_TO_PASS` 测试断言，并支持一键统计 Resolve 成功率与导出官方格式 Predictions。
 - 🛡️ **隔离工作区与路径约束**：动态创建隔离临时工作区，初始化 Git 独立环境，强制约束文件路径不得越权逃逸。
@@ -840,6 +841,81 @@ const benchmark = await engine.benchmarkDefense(myAgentTarget, scenario);
 console.log(`防御拦截漏洞数: ${benchmark.preventedExploitsCount}`);
 console.log(`安全评分提升: +${benchmark.deltaSafetyScore} 分`);
 console.log(renderBenchmarkComparison(benchmark, "markdown"));
+```
+
+---
+
+## 智能体反思与自愈诊断评测引擎 (Reflexion & Self-Correction)
+
+具备自主系统操作权限的 AI 智能体在多步任务执行中不可避免地会遭遇各类偶发或结构性错误：测试套件未通过、编译报错、缺失文件路径、权限拒绝或工具入参异常。**智能体反思与自愈诊断评测引擎**（`src/reflexion`）深入分析智能体轨迹事件，系统性量化智能体在遭遇失败后识别根本原因、反思调整策略并实现自愈的能力。
+
+### 1. 核心特性
+- **失败事件生命周期追踪与多维度归类 (`ReflexionEpisodeDetector`)**：
+  - 精准识别失败触发点并映射为 7 类标准错误模式：`command-failure`（命令非零退出）、`test-regression`（测试断言回归）、`file-not-found`（文件路径不存在）、`syntax-ast-error`（语法与编译错误）、`permission-denied`（沙箱越权与权限拒绝）、`hallucinated-tool`（幻觉工具调用）与 `tool-error`（工具执行异常）；
+  - 全程追踪事件生命周期状态流转：`recovered`（成功修复）、`thrashing`（重试死循环）、`oscillating`（双向震荡）、`abandoned`（放弃处理）、`regressed`（引入新退化）与 `exhausted`（耗尽未决）；
+  - 自动化归纳修复策略：`code-patch-rework`（源码补丁修正）、`rollback-and-restart`（Git 版本回退恢复）、`workspace-cleanup`（清理依赖与构建缓存）、`multi-step-investigation`（排查日志与深入勘测）、`parameter-adjustment`（修正参数标志）与 `alternative-tool`（切换替代工具）。
+- **认知病理行为检测 (`PathologyDetector`)**：
+  - `repetitive-thrashing`（重复死循环）：连续 $\ge 3$ 次执行参数相同且持续失败的工具调用；
+  - `blind-retry`（盲目重试）：在未对工作区进行任何文件修改或环境修正的情况下直接重试失败命令；
+  - `error-ignorance`（错误漠视）：在工具或测试存在明确报错的情况下，智能体依然声称任务已成功完成；
+  - `oscillation`（双向震荡）：在两种对立的配置或指令之间交替反复（$A \rightarrow B \rightarrow A \rightarrow B$）；
+  - `cascading-regression`（级联退化）：对初始错误的修复尝试引发了更大范围的新错误或破坏了既有功能。
+- **全面韧性指标与评分体系 (`ReflexionAnalyzer`)**：
+  - **自主修复率 (Self-Healing Rate, SHR)**：智能体自主解决的失败事件占总失败事件的比例（$0.0 - 1.0$）；
+  - **平均修复轮次 (MTTR)**：从错误触发到最终修复所耗费的平均轮次跨度；
+  - **震荡浪费指数 (Thrashing Index)**：衡量智能体在死循环和无效操作中耗费的无用步数占比（$0 - 100$）；
+  - **认知韧性综合评分 (Cognitive Resilience Score)**：综合考量自愈率、修复速度以及病理严重度扣分的量化得分（$0 - 100$）。
+- **言语反思提示词合成器 (`ReflexionSynthesizer`)**：
+  - 遵循学术界 Reflexion 范式（Shinn et al.），基于故障诊断与病理检测生成结构化反思提示词，可直接注入交互式引导或动态干预总线。
+- **双轨对比基准矩阵 (`compare`)**：
+  - 一键对比基线智能体与反思引导智能体（或多模型横向对比），输出 $\Delta \text{SHR}$、$\Delta \text{MTTR}$、$\Delta \text{Score}$ 及判定结论（`significantly_improved` 等）。
+- **多端诊断报表**：
+  - `terminal`：彩色 ANSI 仪表盘、事件时间轴明细、病理警示框及优化建议；
+  - `markdown`：面向工程评估的专业 GitHub Markdown 报表与对比矩阵；
+  - `json`：供 CI/CD 自动化门禁消费的机器可读全量取证结果。
+
+### 2. CLI 使用示例
+```bash
+# 分析智能体轨迹的自愈表现与认知病理
+agent-harness reflexion -t ./trajectory.json
+
+# 导出 Markdown 诊断报告并导出失败事件明细 JSON
+agent-harness reflexion -t ./trajectory.json -f markdown -o ./reflexion-report.md --export-episodes ./episodes.json
+
+# CI/CD 质量门禁（自愈率低于 80% 或认知韧性分低于 75 时阻断流水线）
+agent-harness reflexion -t ./trajectory.json --min-shr 0.80 --min-resilience-score 75 --max-pathologies 1
+
+# 对比基线与反思引导轨迹的双轨基准提升
+agent-harness reflexion -t ./baseline.json -c ./comparative.json -f markdown -o ./comparison-report.md
+```
+
+### 3. SDK 编程式调用
+```typescript
+import {
+  ReflexionEngine,
+  renderReflexionReport,
+  renderReflexionComparison,
+} from "agent-harness";
+
+const engine = new ReflexionEngine();
+
+// 1. 深度分析单条执行轨迹的自愈能力
+const report = engine.analyzeTrajectory(trajectory);
+console.log(`自主修复率: ${(report.metrics.selfHealingRate * 100).toFixed(1)}%`);
+console.log(`认知韧性评分: ${report.metrics.cognitiveResilienceScore} / 100`);
+console.log(renderReflexionReport(report, "terminal"));
+
+// 2. 遭遇失败事件时动态生成反思引导提示词
+if (report.episodes.length > 0 && report.episodes[0].status !== "recovered") {
+  const prompt = engine.generateReflexionPrompt(report.episodes[0]);
+  console.log("反思引导提示词:\n", prompt);
+}
+
+// 3. 对比基准与反思引导的提升增益
+const comparison = engine.compare(baselineReport, guidedReport);
+console.log(`评测结论: ${comparison.verdict}`);
+console.log(`评分提升: +${comparison.deltaResilienceScore} 分`);
+console.log(renderReflexionComparison(comparison, "markdown"));
 ```
 
 ---

@@ -13,6 +13,7 @@
 
 ## Highlights
 
+- **Agent Reflexion & Self-Correction Diagnostic Engine**: Deep trajectory failure episode tracking across 7 error classes (`command-failure`, `test-regression`, `file-not-found`, `syntax-ast-error`, `permission-denied`, `hallucinated-tool`, `tool-error`), cognitive pathology detection (`repetitive-thrashing`, `blind-retry`, `error-ignorance`, `oscillation`, `cascading-regression`), quantitative resilience metrics (Self-Healing Rate, Mean Turns to Recovery, Thrashing Index, Cognitive Resilience Score), verbal reflection prompt synthesizer, and comparative benchmarking matrix.
 - **Adversarial Red-Teaming & Safety Guardrail Engine**: Systematic adversarial probe injection (prompt injection, secret exfiltration, privilege escalation, destructive commands, supply chain, defense bypass), deep trajectory vulnerability detection, active runtime guardrails (`audit` & `enforce`), defense posture benchmarking, and multi-format safety audit reports.
 - **Multi-Agent Tournament Arena & Elo/Glicko Ladder Engine**: Pairwise head-to-head competitive evaluation, multi-criteria tie-breakers, Round-Robin/Swiss/Matrix tournament modes, calibrated Elo & Glicko-2 ratings, cross-table matrix, and multi-format leaderboards.
 - **Pluggable Sandbox Backends**: Run benchmarks in lightweight local temporary environments or fully virtualized **Docker / Podman** containers with cgroups resource limits and network isolation.
@@ -912,6 +913,81 @@ const benchmark = await engine.benchmarkDefense(myAgentTarget, scenario);
 console.log(`Prevented Exploits: ${benchmark.preventedExploitsCount}`);
 console.log(`Safety Uplift: +${benchmark.deltaSafetyScore} points`);
 console.log(renderBenchmarkComparison(benchmark, "markdown"));
+```
+
+---
+
+## Agent Reflexion & Self-Correction Diagnostic Engine
+
+Autonomous AI agents inevitably encounter errors during multi-step execution: failing test suites, compilation errors, missing files, permission denials, and malformed tool calls. The **Agent Reflexion & Self-Correction Diagnostic Engine** (`src/reflexion`) inspects trajectory execution traces to quantify how autonomously and efficiently an agent detects failures, reflects on root causes, adapts strategies, and self-heals without human intervention.
+
+### 1. Key Capabilities
+- **Failure Episode Tracking & Classification (`ReflexionEpisodeDetector`)**:
+  - Automatically identifies failure trigger events and maps them into 7 standardized error classes: `command-failure`, `test-regression`, `file-not-found`, `syntax-ast-error`, `permission-denied`, `hallucinated-tool`, and `tool-error`.
+  - Tracks episode lifecycles from trigger turn to resolution: `recovered`, `thrashing`, `oscillating`, `abandoned`, `regressed`, or `exhausted`.
+  - Automatically classifies recovery strategies: `code-patch-rework`, `rollback-and-restart`, `workspace-cleanup`, `multi-step-investigation`, `parameter-adjustment`, and `alternative-tool`.
+- **Cognitive Pathology Detection (`PathologyDetector`)**:
+  - `repetitive-thrashing`: Consecutive execution of identical/near-identical failing tool calls without variation.
+  - `blind-retry`: Re-attempting failed tests or build commands without modifying workspace files or dependencies.
+  - `error-ignorance`: Proceeding with task completion declarations despite unresolved non-zero tool exit codes.
+  - `oscillation`: Toggling back and forth between two conflicting configurations or commands ($A \rightarrow B \rightarrow A \rightarrow B$).
+  - `cascading-regression`: Attempts to repair an initial bug inadvertently breaking secondary components or introducing syntax errors.
+- **Holistic Resilience Metrics & Scoring (`ReflexionAnalyzer`)**:
+  - **Self-Healing Rate (SHR)**: Percentage of encountered error states autonomously resolved ($0.0 - 1.0$).
+  - **Mean Turns to Recovery (MTTR)**: Average execution turn latency required to recover from a failure state.
+  - **Thrashing Index**: Normalized score ($0 - 100$) penalizing loopiness and wasted exploratory turns.
+  - **Cognitive Resilience Score**: Comprehensive composite index ($0 - 100$) integrating SHR, MTTR velocity, and pathology severity penalties.
+- **Verbal Reflexion Prompt Synthesizer (`ReflexionSynthesizer`)**:
+  - Automatically generates structured reflection prompts (following the academic Reflexion paradigm by Shinn et al.) summarizing error diagnostics and guiding questions for dynamic agent steering.
+- **Comparative Resilience Benchmarking (`compare`)**:
+  - Compares baseline vs reflection-enhanced runs or evaluates cross-model resilience, quantifying $\Delta \text{SHR}$, $\Delta \text{MTTR}$, $\Delta \text{ResilienceScore}$, and verdict badges.
+- **Multi-Format Diagnostic Reports**:
+  - `terminal`: ANSI scorecard table, episode drilldown timeline, severity badges, and diagnostic recommendations.
+  - `markdown`: Publication-grade GitHub Markdown reports with KPI tables and episode breakdowns.
+  - `json`: Structured telemetry export for automated CI/CD gating.
+
+### 2. CLI Usage
+```bash
+# Analyze agent trajectory for failure episodes and cognitive pathologies
+agent-harness reflexion -t ./trajectory.json
+
+# Export diagnostic report to Markdown and dump failure episodes to JSON
+agent-harness reflexion -t ./trajectory.json -f markdown -o ./reflexion-report.md --export-episodes ./episodes.json
+
+# Enforce resilience gates in CI/CD (fail if SHR < 80% or Resilience Score < 75)
+agent-harness reflexion -t ./trajectory.json --min-shr 0.80 --min-resilience-score 75 --max-pathologies 1
+
+# Benchmark resilience uplift between baseline and reflection-prompted runs
+agent-harness reflexion -t ./baseline.json -c ./comparative.json -f markdown -o ./comparison-report.md
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  ReflexionEngine,
+  renderReflexionReport,
+  renderReflexionComparison,
+} from "agent-harness";
+
+const engine = new ReflexionEngine();
+
+// 1. Analyze trajectory self-correction capabilities
+const report = engine.analyzeTrajectory(trajectory);
+console.log(`Self-Healing Rate: ${(report.metrics.selfHealingRate * 100).toFixed(1)}%`);
+console.log(`Cognitive Resilience Score: ${report.metrics.cognitiveResilienceScore} / 100`);
+console.log(renderReflexionReport(report, "terminal"));
+
+// 2. Synthesize verbal reflection prompt upon encountering an error episode
+if (report.episodes.length > 0 && report.episodes[0].status !== "recovered") {
+  const prompt = engine.generateReflexionPrompt(report.episodes[0]);
+  console.log("Steering Guidance Prompt:\n", prompt);
+}
+
+// 3. Compare baseline vs reflexively guided agent
+const comparison = engine.compare(baselineReport, guidedReport);
+console.log(`Verdict: ${comparison.verdict}`);
+console.log(`Score Uplift: +${comparison.deltaResilienceScore} points`);
+console.log(renderReflexionComparison(comparison, "markdown"));
 ```
 
 ---
