@@ -72,6 +72,14 @@ import {
   type ReflexionReportFormat,
 } from "../reflexion/index.js";
 
+import {
+  TimeTravelEngine,
+  renderTimeTravelReport,
+  type TimeTravelReportFormat,
+  type BuiltinPredicateType,
+  type CounterfactualMutation,
+} from "../timetravel/index.js";
+
 const program = new Command();
 
 program
@@ -1231,6 +1239,102 @@ program
       }
     } catch (err: any) {
       console.error(chalk.red("✘ Reflexion analysis failed:"), err.message);
+      process.exit(1);
+    }
+  });
+
+  program
+  .command("timetravel")
+  .description("Time-travel trajectory debugging, automated failure bisection, and counterfactual branch simulation")
+  .requiredOption("-t, --trajectory <path>", "Path to trajectory JSON file")
+  .option("-b, --bisect", "Run automated binary failure bisection", false)
+  .option(
+    "--predicate-type <type>",
+    "Bisect predicate: exit-code-success, file-exists, file-contains, no-error-output",
+    "exit-code-success"
+  )
+  .option("--predicate-arg <arg>", "Argument for predicate (e.g. filename or pattern)")
+  .option("--fork-turn <turn>", "Fork a counterfactual branch at turn number", (v) => parseInt(v, 10))
+  .option("--override-exit-code <code>", "Override exit code in counterfactual branch", (v) => parseInt(v, 10))
+  .option("--override-output <output>", "Override tool output in counterfactual branch")
+  .option("-f, --format <format>", "Output format: terminal, markdown, json", "terminal")
+  .option("-o, --output <path>", "Output file path to save report")
+  .option("--export-snapshots <path>", "Export all turn snapshots to JSON file")
+  .option("--fail-on-regression", "Exit with code 1 if a regression was pinpointed by bisect", false)
+  .action(async (options) => {
+    try {
+      const trajPath = path.resolve(options.trajectory);
+      const raw = await fs.readFile(trajPath, "utf8");
+      const trajectory = JSON.parse(raw);
+
+      const engine = new TimeTravelEngine();
+      const branches = [];
+
+      if (options.forkTurn !== undefined) {
+        const mutations: CounterfactualMutation[] = [];
+        if (options.overrideExitCode !== undefined || options.overrideOutput !== undefined) {
+          mutations.push({
+            type: "override-tool-result",
+            mockResult: {
+              exitCode: options.overrideExitCode ?? 0,
+              success: options.overrideExitCode === 0 || options.overrideExitCode === undefined,
+              output: options.overrideOutput,
+            },
+          });
+        }
+        const branch = await engine.forkBranch(trajectory, {
+          forkTurn: options.forkTurn,
+          mutations,
+        });
+        branches.push(branch);
+      }
+
+      const bisectOptions = options.bisect
+        ? {
+            predicateType: options.predicateType as BuiltinPredicateType,
+            predicateArg: options.predicateArg,
+          }
+        : undefined;
+
+      const report = await engine.generateReport(trajectory, {
+        runBisect: Boolean(options.bisect),
+        bisectOptions,
+        counterfactualBranches: branches,
+      });
+
+      const rendered = renderTimeTravelReport(report, options.format as TimeTravelReportFormat);
+
+      if (options.output) {
+        const outPath = path.resolve(options.output);
+        await fs.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.writeFile(outPath, rendered, "utf8");
+        console.log(chalk.gray(`Time-travel report written to: ${options.output}`));
+      } else {
+        console.log(rendered);
+      }
+
+      if (options.exportSnapshots) {
+        const snapPath = path.resolve(options.exportSnapshots);
+        await fs.mkdir(path.dirname(snapPath), { recursive: true });
+        const { snapshotManager } = engine.createSession(trajectory);
+        await fs.writeFile(
+          snapPath,
+          JSON.stringify(snapshotManager.getAllSnapshots(), null, 2),
+          "utf8"
+        );
+        console.log(chalk.green(`✔ Turn snapshots exported to: ${options.exportSnapshots}`));
+      }
+
+      if (options.failOnRegression && report.bisectResult && report.bisectResult.firstFaultyTurn !== null) {
+        console.error(
+          chalk.red(
+            `✘ Failure regression pinpointed at Turn ${report.bisectResult.firstFaultyTurn}`
+          )
+        );
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(chalk.red("✘ Time-travel analysis failed:"), err.message);
       process.exit(1);
     }
   });

@@ -264,6 +264,10 @@ export class SnapshotManager {
     return Array.from(this.snapshots.values()).sort((a, b) => a.turnNumber - b.turnNumber);
   }
 
+  public getSnapshotCount(): number {
+    return this.snapshots.size;
+  }
+
   public restoreTurn(turnNumber: number): { virtualFs: VirtualFSState; env: Record<string, string> } {
     const snap = this.getSnapshot(turnNumber);
     if (!snap) {
