@@ -199,18 +199,23 @@ export class SnapshotManager {
   ): void {
     if (!cmd) return;
 
-    // Detect export FOO=bar
-    const exportMatch = cmd.match(/export\s+([A-Za-z_][A-Za-z0-9_]*)=['"]?([^'"]*)['"]?/);
+    // Detect export FOO=bar or export FOO="bar"
+    const exportMatch = cmd.match(
+      /export\s+([A-Za-z_][A-Za-z0-9_]*)=(?:['"]([^'"]*)['"]|([^\s;&|]+))/
+    );
     if (exportMatch) {
-      env[exportMatch[1]] = exportMatch[2];
+      env[exportMatch[1]] = exportMatch[2] ?? exportMatch[3] ?? "";
     }
 
-    // Detect echo "content" > file.txt
-    const redirectMatch = cmd.match(/echo\s+['"]([^'"]*)['"]\s*>\s*([^\s;]+)/);
+    // Detect echo "content" > file.txt or echo 'content' >> file.txt
+    const redirectMatch = cmd.match(/echo\s+['"]([^'"]*)['"]\s*(>>|>)\s*([^\s;&|]+)/);
     if (redirectMatch) {
-      const content = redirectMatch[1];
-      const filePath = redirectMatch[2];
+      const appended = redirectMatch[2] === ">>";
+      const rawText = redirectMatch[1];
+      const filePath = redirectMatch[3];
       const oldFile = fsState[filePath];
+
+      const content = appended && oldFile ? `${oldFile.content}\n${rawText}` : rawText;
       const newHash = computeContentHash(content);
       const deltaType: FileDeltaType = oldFile ? "modified" : "created";
 
@@ -234,7 +239,7 @@ export class SnapshotManager {
     }
 
     // Detect rm -f file.txt
-    const rmMatch = cmd.match(/rm\s+(?:-[rf]+\s+)?([^\s;]+)/);
+    const rmMatch = cmd.match(/rm\s+(?:-[rf]+\s+)?([^\s;&|]+)/);
     if (rmMatch) {
       const filePath = rmMatch[1];
       if (fsState[filePath]) {
