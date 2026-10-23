@@ -920,6 +920,108 @@ console.log(renderReflexionComparison(comparison, "markdown"));
 
 ---
 
+## 智能体时间旅行调试与反事实执行引擎 (Time-Travel & Counterfactual Debugger)
+
+具备长链路执行能力的自主 AI 智能体在面对复杂软件工程或运维任务时，往往在执行深入阶段（例如第 38 步，共 50 步）发生崩溃或断言失败。快速回溯定位污染源引入点、并验证“如果当时采取另一举措结果会如何”的反事实推演，是深入诊断智能体认知决策的关键。**智能体时间旅行调试与反事实执行引擎**（`src/timetravel`）引入了逐轮次沙箱快照、交互式与编程式时间旅行单步跳转、轨迹二分搜索自动根因定位（Agent Trajectory `git bisect`）、断点/观察点拦截器与反事实分支推演模拟。
+
+### 1. 核心特性
+- **逐轮次工作区快照与状态恢复 (`SnapshotManager`)**：
+  - 基于 SHA-256 增量哈希计算，精准追踪每一轮次工作区文件系统的变动集（创建 `created`、修改 `modified`、删除 `deleted`）及环境变量演进；
+  - 支持任意历史轮次状态的一键瞬时恢复（`restoreTurn`）与任意跨度轮次差异比对（`diffTurns`）；
+  - 采用写时复制（Copy-on-Write）差异化压缩，防止长轨迹快照占用过多内存。
+- **时间旅行轨迹步进器 (`TimeTravelStepper`)**：
+  - 支持单步前进（`stepForward`）、单步后退（`stepBackward`）、任意跳转（`jumpToTurn`）与时间线重置（`reset`）；
+  - 灵活的**条件断点 (Breakpoints)**：支持按轮次编号、工具名称、退出码非零、正则错误匹配、目标文件修改或自定义断言断点；
+  - 文件系统**观察点 (Watchpoints)**：针对特定文件路径的创建、修改、删除事件进行实时挂起拦截；
+  - `runUntilBreakpoint()`：连续执行并自动暂停于下一个命中断点或观察点。
+- **自动化缺陷二分搜索定位器 (`TrajectoryBisector`)**：
+  - 将传统软件工程中的 `git bisect` 引入智能体长轨迹调试，以 $O(\log N)$ 的极速二分效率精准锁定引入缺陷的第一个轮次；
+  - 开箱即用的内置断言校验规则：
+    - `exit-code-success`：断言所有工具执行退出码均为 0；
+    - `file-exists`：断言特定文件必须存在；
+    - `file-contains`：断言文件内容必须包含关键模式或字符串；
+    - `no-error-output`：断言工具输出中严禁出现致命崩溃与语法错误；
+    - 自定义同步/异步断言 Oracle：`(snapshot, turnNumber) => boolean`；
+  - 自动归因定位责任工具调用、输出根因摘要并给出置信度评分（Confidence Score）。
+- **反事实分支推演与变异引擎 (`CounterfactualEngine`)**：
+  - 支持在任意轮次 $T_k$ 分叉并注入合成变异：
+    - `override-tool-result`：改写工具返回值、退出码或标准输出（例如模拟原本失败的指令成功）；
+    - `patch-file` / `delete-file`：在分叉点修补或重置工作区关键代码文件；
+    - `inject-prompt`：注入反事实反思或动态引导指令；
+    - `modify-arguments`：替换工具调用入参；
+  - 向后推演重放并量化**分支差异矩阵 (Outcome Delta)**：状态跃迁（从失败成功拯救 `rescued`、退化变差 `worsened`、中性 `neutral`）、轮次增减与 Token 经济学开销对比。
+- **多端专业诊断报表 (`renderTimeTravelReport`)**：
+  - `terminal`：彩色 ANSI 视觉时间轴、Bisect 根因责任卡片、反事实分支效果表与诊断建议；
+  - `markdown`：面向工程复盘的 GitHub Markdown 格式化报表与二分检索日志；
+  - `json`：供 CI/CD 自动化分析消费的完整结构化数据。
+
+### 2. CLI 使用示例
+```bash
+# 检查轨迹时间轴与逐轮快照
+agent-harness timetravel -t ./trajectory.json
+
+# 启动自动化二分搜索，精准定位最先引发故障的轮次
+agent-harness timetravel -t ./trajectory.json --bisect
+
+# 使用 file-contains 规则二分，若存在退化则阻断流水线
+agent-harness timetravel -t ./trajectory.json --bisect --predicate-type file-contains --predicate-arg "src/calc.ts:syntax error" --fail-on-regression
+
+# 模拟反事实分支：在第 3 轮覆盖工具失败结果为成功，并导出 Markdown 报表
+agent-harness timetravel -t ./trajectory.json --fork-turn 3 --override-exit-code 0 --override-output "PASS 1 test passed" -f markdown -o ./timetravel-report.md
+
+# 导出全量逐轮快照供离线深度取证分析
+agent-harness timetravel -t ./trajectory.json --export-snapshots ./snapshots.json
+```
+
+### 3. SDK 编程式调用
+```typescript
+import {
+  TimeTravelEngine,
+  renderTimeTravelReport,
+} from "agent-harness";
+
+const engine = new TimeTravelEngine();
+
+// 1. 创建交互式时间旅行调试会话
+const { stepper, snapshotManager } = engine.createSession(trajectory);
+stepper.setBreakpoint({ type: "exit-code", exitCode: 1 });
+stepper.setWatchpoint("src/index.ts", "modify");
+
+// 步进执行至触发断点
+const breakResult = stepper.runUntilBreakpoint();
+console.log(`暂停于第 ${breakResult.currentTurn} 轮: 命中 ${breakResult.hitBreakpoints.length} 个断点`);
+
+// 2. 自动化二分搜索定位根因轮次
+const bisectResult = await engine.bisect(trajectory, {
+  predicateType: "exit-code-success",
+});
+if (bisectResult.firstFaultyTurn !== null) {
+  console.log(`缺陷引入点: 第 ${bisectResult.firstFaultyTurn} 轮, 根因: ${bisectResult.rootCauseDescription}`);
+}
+
+// 3. 模拟反事实分支推演
+const branch = await engine.forkBranch(trajectory, {
+  branchName: "mock-api-recovery",
+  forkTurn: bisectResult.firstFaultyTurn || 1,
+  mutations: [
+    {
+      type: "override-tool-result",
+      mockResult: { success: true, exitCode: 0, output: "Mocked service response OK" },
+    },
+  ],
+});
+console.log(`分支结局状态: ${branch.outcomeDelta.statusChange}`);
+
+// 4. 生成并渲染综合诊断报表
+const report = await engine.generateReport(trajectory, {
+  runBisect: true,
+  counterfactualBranches: [branch],
+});
+console.log(renderTimeTravelReport(report, "markdown"));
+```
+
+---
+
 ## 架构说明
 
 详细架构规范、沙箱隔离机制与轨迹生命周期，请参阅 [docs/architecture.md](docs/architecture.md)。

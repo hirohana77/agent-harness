@@ -992,6 +992,108 @@ console.log(renderReflexionComparison(comparison, "markdown"));
 
 ---
 
+## Agent Time-Travel Debugger & Counterfactual Execution Engine
+
+Autonomous AI agents executing complex multi-turn coding and operations workflows often fail deep into execution (e.g., Turn 38 of 50). Pinpointing the exact turn where a critical fault or poisoned state was introduced and understanding "what-if" counterfactual scenarios are essential for diagnosing agent reasoning. The **Agent Time-Travel Debugger & Counterfactual Execution Engine** (`src/timetravel`) introduces turn-by-turn state snapshots, interactive and programmatic time navigation, automated binary failure bisection (`git bisect` for agent trajectories), breakpoint/watchpoint triggers, and counterfactual branch simulation.
+
+### 1. Key Capabilities
+- **Turn-by-Turn Workspace Snapshotting (`SnapshotManager`)**:
+  - Deterministically tracks virtual filesystem mutations, environment variable changes, and file deltas (`created`, `modified`, `deleted`) across all turns using SHA-256 content hashing.
+  - Supports instant workspace state restoration (`restoreTurn`) and delta diff inspection (`diffTurns`) between arbitrary turns.
+  - Memory-efficient snapshot management with copy-on-write delta representations.
+- **Time-Travel Trajectory Stepper (`TimeTravelStepper`)**:
+  - Step forward (`stepForward`), step backward (`stepBackward`), jump to any turn (`jumpToTurn`), and reset execution cursor.
+  - Flexible **Breakpoints**: Trigger on specific turn numbers, tool names, exit codes, regex error patterns, modified file paths, or custom predicates.
+  - File **Watchpoints**: Monitor specific file paths and pause upon `create`, `modify`, `delete`, or `any` event.
+  - `runUntilBreakpoint()`: Automatically advances execution until a breakpoint or watchpoint condition is satisfied.
+- **Automated Failure Bisection (`TrajectoryBisector`)**:
+  - Binary search algorithm through trajectory turns to locate the exact inflection point where a defect or invariant violation was introduced in $O(\log N)$ evaluations.
+  - Built-in verification predicates:
+    - `exit-code-success`: Invariant that all tool executions succeed with exit code 0.
+    - `file-exists`: Verifies workspace file presence at any turn.
+    - `file-contains`: Verifies file substring or regex pattern invariants.
+    - `no-error-output`: Asserts absence of fatal error strings in tool stdout/stderr.
+    - Custom asynchronous/synchronous oracles: `(snapshot, turnNumber) => boolean`.
+  - Generates comprehensive attribution logs, faulty tool call identification, and root-cause summaries with confidence scoring.
+- **Counterfactual Branching & Mutation Engine (`CounterfactualEngine`)**:
+  - Fork execution from any turn $T_k$ and inject synthetic mutations:
+    - `override-tool-result`: Mock tool outputs, exit codes, or errors (e.g. simulate command success).
+    - `patch-file` / `delete-file`: Alter workspace files at the fork point.
+    - `inject-prompt`: Insert synthetic steering instructions or counterfactual feedback.
+    - `modify-arguments`: Alter tool call parameters before execution.
+  - Replays forward with a mock dispatcher or sandbox executor and computes the **Outcome Delta**: status change (`rescued`, `worsened`, `neutral`, `identical`), turn reduction, and token economics delta.
+- **Multi-Format Diagnostic Reports (`renderTimeTravelReport`)**:
+  - `terminal`: ANSI visual timeline, bisect blame card, counterfactual branch diffs, and recommendations.
+  - `markdown`: GitHub Markdown report with structured summary tables, bisection search logs, and branch outcome deltas.
+  - `json`: Machine-readable artifact for CI/CD integration.
+
+### 2. CLI Usage
+```bash
+# Inspect trajectory timeline and snapshots
+agent-harness timetravel -t ./trajectory.json
+
+# Run automated binary bisection to locate the exact failure turn
+agent-harness timetravel -t ./trajectory.json --bisect
+
+# Bisect using file-contains predicate and fail CI/CD if regression exists
+agent-harness timetravel -t ./trajectory.json --bisect --predicate-type file-contains --predicate-arg "src/calc.ts:syntax error" --fail-on-regression
+
+# Simulate counterfactual branch: override turn 3 tool failure with mock success
+agent-harness timetravel -t ./trajectory.json --fork-turn 3 --override-exit-code 0 --override-output "PASS 1 test passed" -f markdown -o ./timetravel-report.md
+
+# Export all turn snapshots for offline deep forensic analysis
+agent-harness timetravel -t ./trajectory.json --export-snapshots ./snapshots.json
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  TimeTravelEngine,
+  renderTimeTravelReport,
+} from "agent-harness";
+
+const engine = new TimeTravelEngine();
+
+// 1. Create interactive time-travel debugging session
+const { stepper, snapshotManager } = engine.createSession(trajectory);
+stepper.setBreakpoint({ type: "exit-code", exitCode: 1 });
+stepper.setWatchpoint("src/index.ts", "modify");
+
+// Run until breakpoint triggers
+const breakResult = stepper.runUntilBreakpoint();
+console.log(`Paused at Turn ${breakResult.currentTurn}: hit ${breakResult.hitBreakpoints.length} breakpoint(s)`);
+
+// 2. Automatically bisect trajectory to find root cause of failure
+const bisectResult = await engine.bisect(trajectory, {
+  predicateType: "exit-code-success",
+});
+if (bisectResult.firstFaultyTurn !== null) {
+  console.log(`Fault introduced at Turn ${bisectResult.firstFaultyTurn}: ${bisectResult.rootCauseDescription}`);
+}
+
+// 3. Simulate counterfactual branch
+const branch = await engine.forkBranch(trajectory, {
+  branchName: "mock-api-recovery",
+  forkTurn: bisectResult.firstFaultyTurn || 1,
+  mutations: [
+    {
+      type: "override-tool-result",
+      mockResult: { success: true, exitCode: 0, output: "Mocked service response OK" },
+    },
+  ],
+});
+console.log(`Branch outcome: ${branch.outcomeDelta.statusChange}`);
+
+// 4. Generate and render full report
+const report = await engine.generateReport(trajectory, {
+  runBisect: true,
+  counterfactualBranches: [branch],
+});
+console.log(renderTimeTravelReport(report, "markdown"));
+```
+
+---
+
 ## Architecture Specification
 
 For an in-depth dive into the internal design, sandbox boundaries, trajectory model, and event bus lifecycle, see [docs/architecture.md](docs/architecture.md).
