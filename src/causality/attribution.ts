@@ -85,7 +85,7 @@ export class AttributionEngine {
       const node = graph.nodes[id];
       const depth = distances.get(id) ?? 1;
       const raw = rawScores.get(id) || 0;
-      const responsibility = Math.min(1.0, Math.max(0.0, Number((raw / (raw + 1.0)).toFixed(3))));
+      const responsibility = Math.min(1.0, Math.max(0.0, Number(raw.toFixed(3))));
       const shapley = Number((raw / totalScore).toFixed(4));
       const directImpact = depth === 1;
 

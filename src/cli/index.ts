@@ -80,6 +80,12 @@ import {
   type CounterfactualMutation,
 } from "../timetravel/index.js";
 
+import {
+  CausalAttributionEngine,
+  renderCausalReport,
+  type CausalReportFormat,
+} from "../causality/index.js";
+
 const program = new Command();
 
 program
@@ -1338,6 +1344,71 @@ program
       process.exit(1);
     }
   });
+
+  program
+    .command("causal")
+    .description("Build causal dependency DAG, compute dynamic backward slices, and rank root-cause attributions")
+    .requiredOption("-t, --trajectory <path>", "Path to trajectory JSON file")
+    .option("-s, --scenario <path>", "Path to scenario file (YAML/JSON)")
+    .option("--target <nodeId>", "Target node ID for backward slicing (auto-detected if omitted)")
+    .option("--min-attribution-score <score>", "Minimum responsibility score threshold", (v) => parseFloat(v), 0)
+    .option("-f, --format <format>", "Output format: terminal, markdown, mermaid, dot, json", "terminal")
+    .option("-o, --output <path>", "Output file path to save report")
+    .option("--export-graph <path>", "Export raw CausalGraph JSON to file")
+    .option("--fail-on-root-cause", "Exit with code 1 if a high-confidence root cause (>=60%) is detected", false)
+    .action(async (options) => {
+      try {
+        const trajPath = path.resolve(options.trajectory);
+        const raw = await fs.readFile(trajPath, "utf8");
+        const trajectory = JSON.parse(raw);
+
+        let scenario: any;
+        if (options.scenario) {
+          scenario = await loadScenario(options.scenario);
+        }
+
+        const engine = new CausalAttributionEngine();
+        const graph = engine.buildGraph(trajectory, { scenario });
+        const report = engine.analyze(trajectory, {
+          scenario,
+          targetNodeId: options.target,
+          minAttributionScore: options.minAttributionScore,
+        });
+
+        const rendered = renderCausalReport(report, options.format as CausalReportFormat, graph);
+
+        if (options.output) {
+          const outPath = path.resolve(options.output);
+          await fs.mkdir(path.dirname(outPath), { recursive: true });
+          await fs.writeFile(outPath, rendered, "utf8");
+          console.log(chalk.gray(`Causal attribution report written to: ${options.output}`));
+        } else {
+          console.log(rendered);
+        }
+
+        if (options.exportGraph) {
+          const graphPath = path.resolve(options.exportGraph);
+          await fs.mkdir(path.dirname(graphPath), { recursive: true });
+          await fs.writeFile(graphPath, JSON.stringify(graph, null, 2), "utf8");
+          console.log(chalk.green(`✔ Causal DAG exported to: ${options.exportGraph}`));
+        }
+
+        if (options.failOnRootCause) {
+          const top = report.topAttributions[0];
+          if (top && top.responsibilityScore >= 0.5) {
+            console.error(
+              chalk.red(
+                `✘ High-confidence root cause detected: [Turn ${top.turnNumber ?? "?"}] ${top.label} (${Math.round(top.responsibilityScore * 100)}% responsibility)`
+              )
+            );
+            process.exit(1);
+          }
+        }
+      } catch (err: any) {
+        console.error(chalk.red("✘ Causal analysis failed:"), err.message);
+        process.exit(1);
+      }
+    });
 
 program.parse(process.argv);
 

@@ -96,6 +96,13 @@ export interface CausalInterventionImpact {
   guidance: string;
 }
 
+export type CausalReportFormat =
+  | "terminal"
+  | "markdown"
+  | "mermaid"
+  | "dot"
+  | "json";
+
 export interface CausalReport {
   scenarioId: string;
   timestamp: string;

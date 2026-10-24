@@ -4,4 +4,6 @@ export * from "./graph-builder.js";
 export * from "./slicer.js";
 export * from "./attribution.js";
 export * from "./engine.js";
+export * from "./reporters/index.js";
+
 
