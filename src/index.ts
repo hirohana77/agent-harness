@@ -53,3 +53,5 @@ export * from './arena/index.js';
 export * from './redteam/index.js';
 export * from './reflexion/index.js';
 export * from './timetravel/index.js';
+export * from './causality/index.js';
+
