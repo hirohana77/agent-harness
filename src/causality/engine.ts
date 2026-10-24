@@ -107,29 +107,25 @@ export class CausalAttributionEngine {
 
     // Generate actionable recommendations
     const recommendations: string[] = [];
+    if (topAttributions.length > 0) {
+      const top = topAttributions[0];
+      recommendations.push(
+        `Primary root cause attribution: [Turn ${top.turnNumber ?? "?"}] ${top.label} (Responsibility: ${(top.responsibilityScore * 100).toFixed(1)}%). Recommended focus or steering intervention at this turn.`
+      );
+    }
+
     if (failureSlice.prunedNodeIds.length > 0) {
       const noiseRatio = Math.round(
         (failureSlice.prunedNodeIds.length / Object.keys(graph.nodes).length) * 100
       );
-      if (noiseRatio > 25) {
-        recommendations.push(
-          `Pruned ${failureSlice.prunedNodeIds.length} non-causal noise nodes (${noiseRatio}% of trajectory). Consider tightening agent prompt to reduce exploratory thrashing.`
-        );
-      }
-    }
-
-    if (topAttributions.length > 0) {
-      const top = topAttributions[0];
-      if (top.responsibilityScore > 0.6) {
-        recommendations.push(
-          `Primary root cause identified: [Turn ${top.turnNumber ?? "?"}] ${top.label} (Responsibility: ${(top.responsibilityScore * 100).toFixed(1)}%). Recommended steering intervention at this turn.`
-        );
-      }
-    }
-
-    if (criticalPath.efficiencyRatio < 0.5) {
       recommendations.push(
-        `Critical path efficiency is low (${(criticalPath.efficiencyRatio * 100).toFixed(1)}%). Agent spent >50% of turns on dead ends or redundant attempts.`
+        `Pruned ${failureSlice.prunedNodeIds.length} non-causal noise nodes (${noiseRatio}% of trajectory). Consider tightening agent prompt to reduce exploratory thrashing.`
+      );
+    }
+
+    if (criticalPath.efficiencyRatio < 0.75) {
+      recommendations.push(
+        `Critical path efficiency is ${(criticalPath.efficiencyRatio * 100).toFixed(1)}%. Agent spent turns on dead ends or secondary exploration.`
       );
     }
 

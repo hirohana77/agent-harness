@@ -12,6 +12,7 @@
 
 ## 核心特性
 
+- **智能体因果 DAG 与根因归因分析引擎 (Causal DAG & Root-Cause Attribution Engine)**：从智能体轮次、工具调用、文件读写、Shell 重定向与环境变量变更中自动化重构因果有向无环图（DAG）；动态向后程序切片（Backward Slicing）精准隔离故障祖先子图并剪枝无关噪音动作；基于博弈论 Shapley 权重量化各轮次与工具的因果责任贡献度；关键路径（Critical Path）轨迹效能评估与反事实干预影响推演；支持 Mermaid、Graphviz DOT、Terminal ANSI 与 Markdown 多端可视化导出及 CI/CD 根因阻断门禁。
 - **智能体反思与自愈诊断评测引擎 (Agent Reflexion & Self-Correction)**：针对 7 大错误类别（`command-failure`、`test-regression`、`file-not-found`、`syntax-ast-error`、`permission-denied`、`hallucinated-tool`、`tool-error`）实施全轨迹失败事件追踪，深度识别 5 种认知病理行为（死循环震荡、盲目重试、错误漠视、双向震荡、级联退化），量化自愈率（SHR）、平均修复轮次（MTTR）、震荡指数与认知韧性评分（0-100），提供言语反思提示词合成器与攻防提升对比基准。
 - 🐳 **可插拔沙箱后端 (Docker & Podman)**：支持轻量级本地环境与全虚拟化 Docker / Podman 容器驱动，提供 cgroups 资源限制（内存、CPU、进程数）与完全网络隔离（`network: none`）。
 - 🏆 **SWE-bench 任务集适配器与评测引擎**：原生支持导入 SWE-bench / Lite / Verified JSONL 格式任务集，自动装配专属容器镜像、提取 `FAIL_TO_PASS` 与 `PASS_TO_PASS` 测试断言，并支持一键统计 Resolve 成功率与导出官方格式 Predictions。
@@ -1018,6 +1019,73 @@ const report = await engine.generateReport(trajectory, {
   counterfactualBranches: [branch],
 });
 console.log(renderTimeTravelReport(report, "markdown"));
+```
+
+---
+
+## 智能体因果 DAG 与根因归因分析引擎 (Causal DAG & Attribution Engine)
+
+在长链条、多工具编排任务中（如 20–80 轮次的工程修复任务），智能体的执行失败往往是由早期某个轮次引发的隐式副作用（如错误修改配置、环境破坏或破坏依赖）引起的。传统的执行日志只能按线性时间轴查看，难以揭示深层的因果依赖网络与混淆因素。**智能体因果 DAG 与根因归因分析引擎** (`src/causality`) 能够自动化将长轨迹解构为有向无环图，执行动态向后程序切片，计算博弈论 Shapley 归因贡献度，评估轨迹关键路径效能，并预测反事实干预的影响范围。
+
+### 1. 核心能力
+- **因果图网络自动化拓扑构建 (`CausalGraphBuilder`)**：
+  - 自动解析智能体各轮次 Prompt、工具调用、Shell 重定向 (`>`, `>>`)、环境变量导出 (`export FOO=BAR`)、文件创建/修改/删除以及隐式命令读取 (`cat`, `grep`, `node`, `python` 等)；
+  - 建立强类型 DAG 网络，涵盖 6 类节点（`initial_state`、`agent_turn`、`tool_invocation`、`artifact_state`、`environment_state`、`assertion_outcome`）与 5 类因果依赖边（`data_read`、`data_write`、`context_feed`、`temporal_flow`、`assertion_target`）。
+- **动态向后程序切片与噪音剪枝 (`TrajectorySlicer`)**：
+  - 针对指定故障节点或未通过断言，自动化逆向遍历传递闭包（Transitive Closure），精确提取导致该故障的全部因果祖先子图；
+  - 自动识别并剪除与故障无关的探索噪音（如无害的 `ls -la` 探测、不相关的中间文件写入），量化**搜索空间压缩率**并提取最长因果链路深度。
+- **根因责任度量与 Shapley 归因权重 (`AttributionEngine`)**：
+  - 结合节点类型、与终点的路径拓扑距离、故障状态加权与图中心度，计算各节点的因果责任评分（$0.0 \dots 1.0$）；
+  - 引入合作博弈论 **Shapley 贡献度权重**，公平评估协同决策路径中各步操作的边际责任。
+- **关键路径与效能分析 (`evaluateCriticalPath`)**：
+  - 区分智能体的有效生产步骤与盲目试错分支，量化**关键路径效能比**（$E = \frac{\text{关键轮次数}}{\text{总轮次数}}$），自动定位扇出最大的决策瓶颈节点。
+- **反事实干预影响范围推演 (`predictInterventionImpact`)**：
+  - 正向遍历下游依赖节点，计算修改或回滚某节点时导致的失效节点集合与波及文件范围，预测结局跃迁状态（`rescued` / `worsened` / `neutral`）并输出具体人工引导建议。
+- **多端专业诊断报告输出 (`renderCausalReport`)**：
+  - `terminal`：控制台 ANSI 高亮彩色卡片、关键路径效能状态、责任排行榜及修复建议；
+  - `markdown`：GitHub Markdown 表格与详细切片摘要；
+  - `mermaid`：直接输出 Mermaid.js `graph TD` 流程图，支持节点红绿高亮与粗边框渲染，便于嵌入 GitHub PR 或知识库；
+  - `dot`：输出 Graphviz DOT 格式，可直接导出为矢量图或高精度架构图；
+  - `json`：机器可读 JSON 数据产物，无缝集成于自动化 CI/CD 测试流水线。
+
+### 2. CLI 命令行使用
+```bash
+# 生成因果图并打印控制台归因诊断报告
+agent-harness causal -t ./trajectory.json
+
+# 结合 scenario.yaml 断言进行切片并导出 GitHub Markdown 报告
+agent-harness causal -t ./trajectory.json -s ./scenario.yaml -f markdown -o ./causal-report.md
+
+# 导出 Mermaid 流程图与完整因果 DAG JSON
+agent-harness causal -t ./trajectory.json -f mermaid -o ./dag.mermaid --export-graph ./causal-graph.json
+
+# CI/CD 质量门禁：当检测到高置信度根因（>=50% 责任分）时以退出码 1 阻断流水线
+agent-harness causal -t ./trajectory.json --fail-on-root-cause
+```
+
+### 3. SDK 编程式调用范式
+```typescript
+import {
+  CausalAttributionEngine,
+  renderCausalReport,
+} from "agent-harness";
+
+const engine = new CausalAttributionEngine();
+
+// 1. 构建因果 DAG 并执行自动化根因分析
+const report = engine.analyze(trajectory, {
+  minAttributionScore: 0.3,
+});
+
+console.log(`关键路径效能: ${Math.round(report.criticalPath.efficiencyRatio * 100)}%`);
+if (report.topAttributions.length > 0) {
+  const top = report.topAttributions[0];
+  console.log(`主要根因: 第 ${top.turnNumber} 轮 - ${top.label} (责任度: ${Math.round(top.responsibilityScore * 100)}%)`);
+}
+
+// 2. 导出 Mermaid 格式流程图
+const mermaidDiagram = renderCausalReport(report, "mermaid");
+console.log(mermaidDiagram);
 ```
 
 ---

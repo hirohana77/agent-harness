@@ -13,6 +13,8 @@
 
 ## Highlights
 
+- **Causal DAG & Root-Cause Attribution Engine**: Directed Acyclic Graph dependency reconstruction from trajectory turns, tool invocations, file operations, bash I/O, and environment mutations. Dynamic backward program slicing to isolate failure subgraphs and prune non-causal noise, Shapley-weighted causal responsibility attribution, critical path productivity analysis, counterfactual intervention prediction, Mermaid/DOT flowchart export, and CI/CD quality gate enforcement.
+- **Agent Time-Travel Debugger & Counterfactual Execution Engine**: Turn-by-turn state snapshots, interactive and programmatic time navigation, automated binary failure bisection (`git bisect` for agent trajectories), breakpoint/watchpoint triggers, and counterfactual branch simulation.
 - **Agent Reflexion & Self-Correction Diagnostic Engine**: Deep trajectory failure episode tracking across 7 error classes (`command-failure`, `test-regression`, `file-not-found`, `syntax-ast-error`, `permission-denied`, `hallucinated-tool`, `tool-error`), cognitive pathology detection (`repetitive-thrashing`, `blind-retry`, `error-ignorance`, `oscillation`, `cascading-regression`), quantitative resilience metrics (Self-Healing Rate, Mean Turns to Recovery, Thrashing Index, Cognitive Resilience Score), verbal reflection prompt synthesizer, and comparative benchmarking matrix.
 - **Adversarial Red-Teaming & Safety Guardrail Engine**: Systematic adversarial probe injection (prompt injection, secret exfiltration, privilege escalation, destructive commands, supply chain, defense bypass), deep trajectory vulnerability detection, active runtime guardrails (`audit` & `enforce`), defense posture benchmarking, and multi-format safety audit reports.
 - **Multi-Agent Tournament Arena & Elo/Glicko Ladder Engine**: Pairwise head-to-head competitive evaluation, multi-criteria tie-breakers, Round-Robin/Swiss/Matrix tournament modes, calibrated Elo & Glicko-2 ratings, cross-table matrix, and multi-format leaderboards.
@@ -1090,6 +1092,74 @@ const report = await engine.generateReport(trajectory, {
   counterfactualBranches: [branch],
 });
 console.log(renderTimeTravelReport(report, "markdown"));
+```
+
+---
+
+## Causal DAG & Root-Cause Attribution Engine
+
+In complex, multi-turn agent trajectories (e.g. 20–80 turns), failures and regressions often stem from subtle side-effects introduced dozens of turns earlier (e.g., misconfigured environments, malformed edits, or corrupted artifacts). Traditional post-mortems treat trajectories as linear sequences, obscuring true causal chains and confounding factors. The **Causal DAG & Root-Cause Attribution Engine** (`src/causality`) reconstructs an explicit Directed Acyclic Graph (DAG) of all trajectory events, computes dynamic backward slices to isolate failure antecedents and prune noise, quantifies game-theoretic Shapley causal attribution, evaluates critical path efficiency, and predicts intervention blast radiuses.
+
+### 1. Key Capabilities
+- **Causal Graph Reconstruction (`CausalGraphBuilder`)**:
+  - Automatically parses trajectory turns, tool invocations, shell redirects (`>`, `>>`), environment exports (`export FOO=BAR`), file writes, and implicit command reads (`cat`, `grep`, `node`, `python`).
+  - Constructs a typed Directed Acyclic Graph containing 6 node classes (`initial_state`, `agent_turn`, `tool_invocation`, `artifact_state`, `environment_state`, `assertion_outcome`) and 5 causal edge types (`data_read`, `data_write`, `context_feed`, `temporal_flow`, `assertion_target`).
+- **Dynamic Backward Slicing & Noise Pruning (`TrajectorySlicer`)**:
+  - Computes transitive backward reachability from any target failure node or assertion outcome.
+  - Automatically prunes non-contributing exploratory noise (e.g., read-only `ls -la`, redundant status checks, unrelated side-effects), computing exact **Search Space Compression Ratios**.
+  - Traces the longest causal path to establish maximal causal chain depth.
+- **Root-Cause Attribution & Shapley Weights (`AttributionEngine`)**:
+  - Quantifies causal responsibility ($0.0 \dots 1.0$) using multi-factor graph centrality, path proximity, tool failure status, and critical path presence.
+  - Computes cooperative game-theoretic **Shapley Weights** to fairly distribute accountability across cooperating antecedent decisions.
+- **Critical Path & Efficiency Metrics**:
+  - Distinguishes productive steps from exploratory dead ends, yielding an **Efficiency Ratio** ($E = \frac{\text{Critical Turns}}{\text{Total Turns}}$) and identifying execution bottlenecks.
+- **Counterfactual Intervention Guidance (`predictInterventionImpact`)**:
+  - Forward-propagates graph blast radiuses to identify all invalidated downstream nodes and affected artifacts if a node is modified or reverted, predicting outcome transitions (`rescued`, `worsened`, `neutral`).
+- **Multi-Format Visual Reports (`renderCausalReport`)**:
+  - `terminal`: ANSI visual summary, critical path badges, attribution leaderboard, and actionable remediation notes.
+  - `markdown`: GitHub-flavored Markdown tables and slice breakdowns.
+  - `mermaid`: Direct Mermaid.js `graph TD` flowchart export with node status styling for GitHub PRs and documentation.
+  - `dot`: Graphviz DOT export for rendering high-resolution SVG/PNG topology diagrams.
+  - `json`: Machine-readable structured schema for automated pipelines.
+
+### 2. CLI Usage
+```bash
+# Build causal DAG and display terminal attribution summary
+agent-harness causal -t ./trajectory.json
+
+# Perform backward slicing with respect to scenario assertions and export Markdown report
+agent-harness causal -t ./trajectory.json -s ./scenario.yaml -f markdown -o ./causal-report.md
+
+# Export Mermaid flowchart and raw CausalGraph JSON
+agent-harness causal -t ./trajectory.json -f mermaid -o ./dag.mermaid --export-graph ./causal-graph.json
+
+# Enforce CI/CD quality gate: fail if high-confidence root cause (>=50% responsibility) is detected
+agent-harness causal -t ./trajectory.json --fail-on-root-cause
+```
+
+### 3. Programmatic SDK Usage
+```typescript
+import {
+  CausalAttributionEngine,
+  renderCausalReport,
+} from "agent-harness";
+
+const engine = new CausalAttributionEngine();
+
+// 1. Build causal DAG and compute full attribution report
+const report = engine.analyze(trajectory, {
+  minAttributionScore: 0.3,
+});
+
+console.log(`Critical Path Efficiency: ${Math.round(report.criticalPath.efficiencyRatio * 100)}%`);
+if (report.topAttributions.length > 0) {
+  const top = report.topAttributions[0];
+  console.log(`Primary Root Cause: Turn ${top.turnNumber} - ${top.label} (${Math.round(top.responsibilityScore * 100)}%)`);
+}
+
+// 2. Render report as Mermaid flowchart or Markdown
+const mermaidDiagram = renderCausalReport(report, "mermaid");
+console.log(mermaidDiagram);
 ```
 
 ---
